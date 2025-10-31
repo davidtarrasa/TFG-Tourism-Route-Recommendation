@@ -205,3 +205,17 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Ignorar claves/API tokens
+.env
+
+# Ignorar carpetas de datos locales
+data/
+!data/README.md   # si quieres dejar un placeholder vacío
+
+# Ignorar cosas de Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.DS_Store
