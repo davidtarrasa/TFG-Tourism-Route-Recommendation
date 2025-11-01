@@ -41,7 +41,7 @@ def get_classifier():
         return pipeline(
             "zero-shot-classification",
             model=PRIMARY_MODEL, tokenizer=PRIMARY_MODEL,
-            use_fast=False, device=0
+            use_fast=False, device=device
         ), PRIMARY_MODEL
     except Exception as e:
         print(f"[WARN] Multilingüe no disponible ({e}). Uso fallback inglés DistilBERT-MNLI.")
@@ -69,9 +69,16 @@ TEMPLATES = [
     "This category is typically {}.",
     "This place can be used without paying money, so it is {}.",
 ]
-FREE_THRESHOLD = 0.5
-PAID_THRESHOLD = 0.65
-MARGIN_MIN    = 0.10
+# Umbrales (ajustables por variables de entorno)
+def _get_float_env(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)))
+    except Exception:
+        return default
+
+FREE_THRESHOLD = _get_float_env("FREE_THRESHOLD", 0.5)
+PAID_THRESHOLD = _get_float_env("PAID_THRESHOLD", 0.65)
+MARGIN_MIN    = _get_float_env("MARGIN_MIN", 0.10)
 
 # --------- Overrides simples (ajusta si quieres) ---------
 FREE_GT_FORCE = {
@@ -129,7 +136,10 @@ PAID_GT_FORCE = {
 def load_categories_and_prices():
     cat_name = {}                   # id -> name
     cat_prices = defaultdict(list)  # id -> [price tiers 0..4]
-    for path in glob.glob(JSON_GLOB):
+    files = glob.glob(JSON_GLOB)
+    if not files:
+        print(f"[WARN] No se han encontrado ficheros con el patron: {JSON_GLOB}")
+    for path in files:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         for poi in data:
@@ -204,6 +214,8 @@ def main():
         print(f"Dispositivo del modelo: {clf.model.device}")
     except Exception:
         pass
+    print(f"Modelo usado: {used_model}")
+    print(f"Umbrales -> FREE_THRESHOLD={FREE_THRESHOLD}, PAID_THRESHOLD={PAID_THRESHOLD}, MARGIN_MIN={MARGIN_MIN}")
     cat_name, cat_prices = load_categories_and_prices()
     print(f"Categorías únicas: {len(cat_name):,}")
 
