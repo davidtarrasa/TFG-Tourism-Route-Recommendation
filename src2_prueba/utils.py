@@ -130,12 +130,7 @@ def normalize_poi_obj(obj: dict) -> Dict[str, Any]:
         cid = c.get("id") or c.get("fsq_category_id")
         name = c.get("name")
         if cid and name:
-            categories.append(
-                {
-                    "id": str(cid),
-                    "name": name,
-                }
-            )
+            categories.append({"id": str(cid), "name": name})
     primary_cat = categories[0]["name"] if categories else None
 
     rating = obj.get("rating")
@@ -150,9 +145,11 @@ def normalize_poi_obj(obj: dict) -> Dict[str, Any]:
     if isinstance(price, dict):
         price = price.get("tier")
 
+    name = obj.get("name") or primary_cat or f"POI-{fsq}"
+
     return {
         "fsq_id": str(fsq),
-        "name": obj.get("name"),
+        "name": name,
         "lat": lat,
         "lon": lon,
         "city": city,

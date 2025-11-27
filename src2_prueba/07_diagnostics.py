@@ -1,8 +1,9 @@
-﻿"""07_diagnostics.py: cobertura std vs POIs y reportes básicos."""
+﻿# -*- coding: utf-8 -*-
+"""07_diagnostics.py: cobertura std vs POIs y reportes básicos."""
 import argparse
 from collections import Counter
 from pathlib import Path
-
+import json
 import pandas as pd
 
 from utils import get_city_config, load_json_list
@@ -17,7 +18,17 @@ def coverage(std_df: pd.DataFrame, city_key: str, pois_path: Path):
     pois = load_json_list(str(pois_path))
     ids_poi = {str(p.get("fsq_id")) for p in pois if p.get("fsq_id")}
     missing = sorted(ids_std - ids_poi)
-    return ids_std, ids_poi, missing
+    return ids_std, ids_poi, missing, pois
+
+
+def null_stats(pois: list) -> dict:
+    fields = ["name", "price", "rating", "total_ratings", "city", "country", "categories", "lat", "lon"]
+    stats = {}
+    total = len(pois)
+    for f in fields:
+        stats[f] = sum(1 for p in pois if not p.get(f) and p.get(f) not in (0, False))
+    stats["total"] = total
+    return stats
 
 
 def main():
@@ -32,13 +43,20 @@ def main():
     for city in args.cities:
         cfg = get_city_config(city)
         pois_path = Path(args.pois_pattern.format(name=cfg["file"]))
-        ids_std, ids_poi, missing = coverage(df, city, pois_path)
+        ids_std, ids_poi, missing, pois = coverage(df, city, pois_path)
 
         (REPORT_DIR / f"missing_{cfg['file']}.txt").write_text("\n".join(missing), encoding="utf-8")
         (REPORT_DIR / f"ids_std_{cfg['file']}.txt").write_text("\n".join(sorted(ids_std)), encoding="utf-8")
         (REPORT_DIR / f"ids_pois_{cfg['file']}.txt").write_text("\n".join(sorted(ids_poi)), encoding="utf-8")
 
-        print(f"[7/8] {cfg['name']}: std={len(ids_std):,} pois={len(ids_poi):,} missing={len(missing):,}")
+        stats = null_stats(pois)
+        (REPORT_DIR / f"nulls_{cfg['file']}.json").write_text(json.dumps(stats, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        print(
+            f"[7/8] {cfg['name']}: std={len(ids_std):,} pois={len(ids_poi):,} missing={len(missing):,} | "
+            f"price_null={stats['price']:,} rating_null={stats['rating']:,} total_ratings_null={stats['total_ratings']:,} "
+            f"name_null={stats['name']:,} categories_null={stats['categories']:,} city_null={stats['city']:,} country_null={stats['country']:,}"
+        )
 
     counts = Counter(df["venue_city"].astype(str))
     (REPORT_DIR / "std_city_distribution.csv").write_text(

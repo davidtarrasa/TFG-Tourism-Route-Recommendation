@@ -1,4 +1,5 @@
-﻿"""03_fetch_pois.py: descarga POIs por IDs desde Foursquare (async, reanudable)."""
+﻿# -*- coding: utf-8 -*-
+"""03_fetch_pois.py: descarga POIs por IDs desde Foursquare (async, reanudable)."""
 import argparse
 import asyncio
 import json
@@ -8,17 +9,18 @@ from collections import deque
 from typing import Dict, List, Optional, Set, Tuple
 
 import httpx
+import pandas as pd
 from dotenv import load_dotenv
 
 from utils import get_city_config, clean_fsq_id, save_json
 
 API_BASE = "https://places-api.foursquare.com/places/{}"
+STD_PATH = "data/processed/std_clean.csv"
 
 
 def read_ids(path: str) -> List[str]:
     with open(path, "r", encoding="utf-8") as f:
         ids = [clean_fsq_id(ln.strip()) for ln in f if ln.strip()]
-    # dedup preservando orden
     seen, out = set(), []
     for x in ids:
         if x and x not in seen:
@@ -99,9 +101,11 @@ def combine_and_save(out_path: str, existing: List[dict], new_data: Dict[str, di
     return len(combined)
 
 
-async def runner(ids: List[str], out_path: str, api_key: str, concurrency: int, max_per_second: Optional[int]):
+async def runner(ids: List[str], out_path: str, api_key: str, concurrency: int, max_per_second: Optional[int], max_requests: Optional[int]):
     existing_list, existing_ids = load_existing(out_path)
     ids_to_fetch = [x for x in ids if x not in existing_ids]
+    if max_requests and max_requests > 0:
+        ids_to_fetch = ids_to_fetch[:max_requests]
     if not ids_to_fetch:
         total = combine_and_save(out_path, existing_list, {})
         logging.info(f"Nada nuevo que descargar. Total en fichero: {total}")
@@ -144,14 +148,14 @@ def main():
     load_dotenv()
     parser = argparse.ArgumentParser(description="Descarga POIs desde IDs Foursquare")
     parser.add_argument("--city", required=True, help="osaka / istanbul / petalingjaya")
-    parser.add_argument("--ids-path", help="Ruta alternativa de ids_<city>.txt")
+    parser.add_argument("--ids-path", help="Ruta alternativa de ids_<city>.txt; si no se indica, se usan IDs de std_clean.csv")
     parser.add_argument("--out", help="Ruta alternativa de salida")
     parser.add_argument("--concurrency", type=int, default=12)
     parser.add_argument("--max-per-second", type=int, default=8)
+    parser.add_argument("--max-requests", type=int, default=2000, help="Límite de IDs a consultar en esta ejecución (0 = sin límite)")
     args = parser.parse_args()
 
     cfg = get_city_config(args.city)
-    ids_path = args.ids_path or f"data/intermediate/ids_{cfg['file']}.txt"
     out_path = args.out or f"data/raw/raw_pois_{cfg['file']}.json"
 
     api_key = os.getenv("FOURSQUARE_API_KEY")
@@ -159,9 +163,24 @@ def main():
         raise SystemExit("FOURSQUARE_API_KEY no encontrada en .env")
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-    ids = read_ids(ids_path)
+    if args.ids_path:
+        ids = read_ids(args.ids_path)
+    else:
+        if not os.path.exists(STD_PATH):
+            raise SystemExit(f"No se encontró {STD_PATH}; especifica --ids-path")
+        df = pd.read_csv(STD_PATH, usecols=["venue_id", "venue_city"])
+        ids = (
+            df[df["venue_city"] == cfg["qid"]]["venue_id"]
+            .dropna()
+            .astype(str)
+            .map(clean_fsq_id)
+            .dropna()
+            .unique()
+            .tolist()
+        )
+        logging.info(f"{cfg['name']}: {len(ids):,} IDs tomados de std_clean.csv")
     mps = None if args.max_per_second <= 0 else args.max_per_second
-    asyncio.run(runner(ids, out_path, api_key, args.concurrency, mps))
+    asyncio.run(runner(ids, out_path, api_key, args.concurrency, mps, args.max_requests))
 
 
 if __name__ == "__main__":
