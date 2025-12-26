@@ -30,6 +30,26 @@ El sistema combina:
 
 ---
 
+## Arranque rápido (Docker + Postgres)
+
+1. Copia `.env.example` a `.env` y rellena `FOURSQUARE_API_KEY` si vas a usar la API.
+2. Levanta Postgres (mapeado al puerto host 55432) y pgAdmin:  
+   `docker compose up -d db pgadmin`
+3. Prepara el entorno Python para cargar datos:  
+   `python -m venv .venv && .\.venv\Scripts\activate`  
+   `pip install -r requirements.txt`
+4. Carga el esquema y los datos procesados:  
+   `python src/etl/08_load_postgres.py --dsn postgresql://tfg:tfgpass@localhost:55432/tfg_routes`
+5. Verifica conteos:  
+   `docker compose exec -T db psql -U tfg -d tfg_routes -c "SELECT COUNT(*) FROM visits; SELECT COUNT(*) FROM pois; SELECT COUNT(*) FROM poi_categories;"`
+6. pgAdmin: `http://localhost:8080` (creds en `.env`). Registra un server con host `db`, port `5432`, database `tfg_routes`, user `tfg`, pass `tfgpass`.
+
+Notas:
+- El puerto host es 55432 porque muchos equipos ya tienen Postgres en 5432 (`55432:5432` en `docker-compose.yml`).
+- Los datos procesados (`data/processed/std_clean.csv` y `pois_enriched_*.json`) ya vienen en el repo, así que la carga es directa.
+
+---
+
 ## 🏗️ Arquitectura general
 
 La arquitectura objetivo del proyecto es:

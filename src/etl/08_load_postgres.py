@@ -24,8 +24,10 @@ def load_schema(conn, schema_path: Path):
 
 
 def copy_csv(conn, csv_path: Path, table: str):
-    with conn.cursor() as cur, csv_path.open("r", encoding="utf-8") as f:
-        cur.copy(f"COPY {table} FROM STDIN WITH CSV HEADER", f)
+    # psycopg3: usar copy() como context manager y escribir el CSV completo
+    with conn.cursor() as cur, cur.copy(f"COPY {table} FROM STDIN WITH CSV HEADER") as cp:
+        with csv_path.open("r", encoding="utf-8") as f:
+            cp.write(f.read())
     conn.commit()
     print(f"[8/8] Cargado CSV -> {table}")
 
