@@ -73,3 +73,15 @@ Usuario (terminal / web / chat)
   Base de datos PostgreSQL   Motor RAG + LLM
  (POIs, trails, usuarios)   (embeddings, búsqueda)
 ```
+
+---
+
+## Ideas de mejora / backlog
+
+- Recomendadores básicos adicionales:
+  - POI más cercano: matriz de distancias entre POIs por ciudad; dado un POI actual, recomendar el más próximo (ojo al tamaño de la matriz en Osaka/PJ).
+  - Markov por POI: matriz de transiciones entre POIs a partir de rutas históricas; dado el POI actual, elegir el siguiente con máxima probabilidad de transición.
+  - Markov por categoría: transiciones entre categorías; si hay empates, romper con el POI más cercano.
+- Añadir vistas SQL útiles (ej. pois con categorías agregadas) para consultas rápidas desde API/notebooks.
+- Baselines de recomendación en terminal (content-based / colaborative / clustering) con un CLI unificado.
+- Esqueleto FastAPI con `/health` y `/recommend` leyendo de Postgres para conectar pronto con frontend.

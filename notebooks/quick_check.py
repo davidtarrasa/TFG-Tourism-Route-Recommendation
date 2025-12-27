@@ -1,35 +1,31 @@
+"""
+quick_check.py: diagnósticos rápidos sobre std_clean y POIs enriquecidos.
+
+Uso:
+  python notebooks/quick_check.py
+
+Genera reportes en data/reports/diagnostics y muestra resúmenes por consola.
+"""
 import json
 from pathlib import Path
 from collections import Counter, defaultdict
 
 import pandas as pd
 
-# -----------------------------
-# Rutas principales (ajústalas si cambian)
-# -----------------------------
-STD_CLEAN = Path("data/processed/std_2018_clean.csv")
-
+# Rutas principales
+STD_CLEAN = Path("data/processed/std_clean.csv")
 POIS_BY_CITY = {
-    "istanbul": Path("data/processed/foursquare/ALL_POIS_Istanbul_prof_filtered.json"),
-    "osaka": Path("data/processed/foursquare/ALL_POIS_Osaka_prof_filtered.json"),
-    "petalingjaya": Path("data/processed/foursquare/ALL_POIS_PetalingJaya_prof_filtered.json"),
+    "istanbul": Path("data/processed/pois_enriched_Istanbul.json"),
+    "osaka": Path("data/processed/pois_enriched_Osaka.json"),
+    "petalingjaya": Path("data/processed/pois_enriched_PetalingJaya.json"),
 }
+# QIDs tal como están en std_clean (sin prefijo 'wd:')
+CITY_QIDS = {"istanbul": "Q406", "osaka": "Q35765", "petalingjaya": "Q864965"}
 
-# QIDs de ciudad tal como dejaste en std_2018_clean (sin prefijo 'wd:')
-CITY_QIDS = {
-    "istanbul": "Q406",
-    "osaka": "Q35765",
-    "petalingjaya": "Q864965",
-}
-
-# Salidas opcionales
 REPORT_DIR = Path("data/reports/diagnostics")
 REPORT_DIR.mkdir(parents=True, exist_ok=True)
 
 
-# -----------------------------
-# Utilidades
-# -----------------------------
 def load_json_list(path: Path):
     if not path.exists() or path.stat().st_size == 0:
         return []
@@ -61,59 +57,37 @@ def first_category_name(cat_list):
     return None
 
 
-# -----------------------------
-# 1) Resumen de std_2018_clean
-# -----------------------------
 def summarize_std(std_path: Path):
     if not std_path.exists():
-        raise SystemExit(f"❌ No existe {std_path}")
-
+        raise SystemExit(f"No existe {std_path}")
     df = pd.read_csv(std_path)
-
-    # Asegurar tipos mínimos
-    for col in ["venue_id", "venue_city", "timestamp"]:
-        if col in df.columns:
-            df[col] = df[col].astype(str)
-
-    # Rango temporal en UTC (ya normalizaste a Z)
     ts = pd.to_datetime(df["timestamp"], errors="coerce", utc=True)
-    ts_valid = ts.dropna()
-    date_min = ts_valid.min()
-    date_max = ts_valid.max()
-
     summary = {
         "rows": len(df),
         "users": df["user_id"].nunique() if "user_id" in df.columns else None,
         "trails": df["trail_id"].nunique() if "trail_id" in df.columns else None,
         "venues": df["venue_id"].nunique(),
         "cities_qid_present": df["venue_city"].value_counts().to_dict(),
-        "ts_min_utc": str(date_min) if pd.notna(date_min) else None,
-        "ts_max_utc": str(date_max) if pd.notna(date_max) else None,
+        "ts_min_utc": str(ts.min()) if len(ts) else None,
+        "ts_max_utc": str(ts.max()) if len(ts) else None,
     }
-
-    # Guardar distribución por ciudad
     df["venue_city"].value_counts().to_csv(REPORT_DIR / "std_city_distribution.csv")
-
-    # Guardar distribución por usuario y trail (rápido)
     if "user_id" in df.columns:
         df["user_id"].value_counts().to_csv(REPORT_DIR / "std_users_counts.csv")
     if "trail_id" in df.columns:
         df["trail_id"].value_counts().to_csv(REPORT_DIR / "std_trails_counts.csv")
 
-    print("=== STD_2018_CLEAN SUMMARY ===")
+    print("=== STD_CLEAN SUMMARY ===")
     for k, v in summary.items():
         print(f"{k:>18}: {v}")
     print()
-
     return df
 
 
-# -----------------------------
-# 2) Resumen de JSONs del profe por ciudad
-# -----------------------------
-def summarize_prof_jsons():
+def summarize_pois():
     per_city = {}
     all_ids = set()
+    (REPORT_DIR / "per_city").mkdir(parents=True, exist_ok=True)
 
     for city, path in POIS_BY_CITY.items():
         data = load_json_list(path)
@@ -163,7 +137,6 @@ def summarize_prof_jsons():
         }
 
         # Guardar top categorías y listado de ids por ciudad
-        (REPORT_DIR / "per_city").mkdir(exist_ok=True, parents=True)
         pd.Series(dict(cat_counter.most_common())).to_csv(
             REPORT_DIR / "per_city" / f"top_categories_{city}.csv"
         )
@@ -171,104 +144,97 @@ def summarize_prof_jsons():
             REPORT_DIR / "per_city" / f"fsq_ids_{city}.csv", index=False
         )
 
-    print("=== PROF JSONS SUMMARY BY CITY ===")
+    print("=== POIS SUMMARY BY CITY ===")
     for city, info in per_city.items():
         print(f"\n[{city}] file={info['file']}")
         for k in [
-            "pois_in_file","unique_fsq_ids","duplicate_ids",
-            "null_city","null_rating","null_price","null_total_ratings","invalid_latlon"
+            "pois_in_file",
+            "unique_fsq_ids",
+            "duplicate_ids",
+            "null_city",
+            "null_rating",
+            "null_price",
+            "null_total_ratings",
+            "invalid_latlon",
         ]:
             print(f"  {k:>20}: {info[k]}")
         print("  top_categories:", info["top_categories"][:5])
-
     print()
     return per_city, all_ids
 
 
-# -----------------------------
-# 3) Cobertura std vs prof (por ciudad y global)
-# -----------------------------
-def coverage_std_vs_prof(std_df, prof_ids_by_city):
-    # Por ciudad
+def coverage_std_vs_pois(std_df):
     per_city_coverage = {}
     missing_by_city = {}
+    (REPORT_DIR / "missing").mkdir(parents=True, exist_ok=True)
+
     for city, qid in CITY_QIDS.items():
         sub = std_df[std_df["venue_city"] == qid]
         ids_std_city = set(sub["venue_id"].astype(str))
 
-        # ids del profe para esa ciudad
-        # leemos del fichero que acabamos de cargar
-        prof_ids_path = REPORT_DIR / "per_city" / f"fsq_ids_{city}.csv"
-        ids_prof_city = set()
-        if prof_ids_path.exists():
-            s = pd.read_csv(prof_ids_path, header=None).iloc[:,0].astype(str)
-            ids_prof_city = set(s.tolist())
+        ids_poi = set()
+        poi_ids_path = REPORT_DIR / "per_city" / f"fsq_ids_{city}.csv"
+        if poi_ids_path.exists():
+            s = pd.read_csv(poi_ids_path, header=None).iloc[:, 0].astype(str)
+            ids_poi = set(s.tolist())
 
-        matched = ids_std_city & ids_prof_city
-        missing = ids_std_city - ids_prof_city
+        matched = ids_std_city & ids_poi
+        missing = ids_std_city - ids_poi
 
         per_city_coverage[city] = {
             "std_ids": len(ids_std_city),
-            "prof_ids": len(ids_prof_city),
+            "poi_ids": len(ids_poi),
             "matched": len(matched),
             "coverage_pct": pct(len(matched), len(ids_std_city)),
         }
         missing_by_city[city] = sorted(missing)
 
-        # Guarda los faltantes por ciudad (para cuando tengas cuota)
-        (REPORT_DIR / "missing").mkdir(exist_ok=True, parents=True)
-        with (REPORT_DIR / "missing" / f"missing_ids_{city}.txt").open("w", encoding="utf-8") as f:
+        with (REPORT_DIR / "missing" / f"missing_ids_{city}.txt").open(
+            "w", encoding="utf-8"
+        ) as f:
             for vid in missing_by_city[city]:
                 f.write(vid + "\n")
 
     # Global
     ids_std_all = set(std_df["venue_id"].astype(str))
-    ids_prof_all = set()
+    ids_poi_all = set()
     for city in CITY_QIDS.keys():
         p = REPORT_DIR / "per_city" / f"fsq_ids_{city}.csv"
         if p.exists():
-            s = pd.read_csv(p, header=None).iloc[:,0].astype(str)
-            ids_prof_all |= set(s.tolist())
+            s = pd.read_csv(p, header=None).iloc[:, 0].astype(str)
+            ids_poi_all |= set(s.tolist())
 
-    matched_all = ids_std_all & ids_prof_all
+    matched_all = ids_std_all & ids_poi_all
     global_cov = {
         "std_ids_total": len(ids_std_all),
-        "prof_ids_total": len(ids_prof_all),
+        "poi_ids_total": len(ids_poi_all),
         "matched_total": len(matched_all),
         "coverage_pct": pct(len(matched_all), len(ids_std_all)),
     }
 
-    print("=== COVERAGE STD vs PROF ===")
+    print("=== COVERAGE STD vs POIs (enriched) ===")
     for city, row in per_city_coverage.items():
-        print(f"{city:>14} | std={row['std_ids']:5d} prof={row['prof_ids']:5d} "
-              f"matched={row['matched']:5d} → {row['coverage_pct']:5.1f}%")
-    print(f"{'-'*60}")
-    print(f"{'GLOBAL':>14} | std={global_cov['std_ids_total']:5d} "
-          f"prof={global_cov['prof_ids_total']:5d} matched={global_cov['matched_total']:5d} "
-          f"→ {global_cov['coverage_pct']:5.1f}%\n")
-
+        print(
+            f"{city:>14} | std={row['std_ids']:6d} poi={row['poi_ids']:6d} "
+            f"matched={row['matched']:6d} -> {row['coverage_pct']:5.1f}%"
+        )
+    print("-" * 60)
+    print(
+        f"{'GLOBAL':>14} | std={global_cov['std_ids_total']:6d} "
+        f"poi={global_cov['poi_ids_total']:6d} matched={global_cov['matched_total']:6d} "
+        f"-> {global_cov['coverage_pct']:5.1f}%\n"
+    )
     return per_city_coverage, global_cov
 
-# -----------------------------
-# 4) Catálogo de categorías (por ciudad y global)
-# -----------------------------
-from collections import defaultdict
 
 def catalog_categories():
-    """
-    Recorre los ALL_POIS_*_prof_filtered.json y construye:
-      - Por ciudad: conteo por (category_id, name)
-      - Global: conteo agregado y detección de inconsistencias id->name
-    Guarda CSVs en data/reports/diagnostics/per_city/ y uno global.
-    """
-    per_city_rows = {}  # city -> list[(cat_id, name, count)]
-    global_counter = defaultdict(int)   # (cat_id, name) -> count
-    id_to_names = defaultdict(set)      # cat_id -> set(names vistos)
+    per_city_rows = {}
+    global_counter = defaultdict(int)  # (cat_id, name) -> count
+    id_to_names = defaultdict(set)  # cat_id -> set(names vistos)
 
     for city, path in POIS_BY_CITY.items():
         data = load_json_list(path)
-        local_counter = defaultdict(int)  # (cat_id, name) -> count
-
+        local_counter = defaultdict(int)
         for obj in data:
             cats = obj.get("categories") or []
             for c in cats:
@@ -278,93 +244,42 @@ def catalog_categories():
                 cname = c.get("name")
                 if not cid or not cname:
                     continue
-                key = (cid, cname)
-                local_counter[key] += 1
-                global_counter[key] += 1
+                local_counter[(cid, cname)] += 1
+                global_counter[(cid, cname)] += 1
                 id_to_names[cid].add(cname)
 
-        rows = [(cid, cname, cnt) for (cid, cname), cnt in sorted(local_counter.items(), key=lambda x: (-x[1], x[0][0]))]
+        rows = [(cid, cname, cnt) for (cid, cname), cnt in local_counter.items()]
         per_city_rows[city] = rows
-
-        # export por ciudad
-        (REPORT_DIR / "per_city").mkdir(exist_ok=True, parents=True)
         pd.DataFrame(rows, columns=["category_id", "name", "count"]).to_csv(
-            REPORT_DIR / "per_city" / f"categories_catalog_{city}.csv", index=False
+            REPORT_DIR / "per_city" / f"categories_{city}.csv", index=False
         )
 
-    # global
-    global_rows = [(cid, cname, cnt) for (cid, cname), cnt in sorted(global_counter.items(), key=lambda x: (-x[1], x[0][0]))]
+    # Global
+    global_rows = [(cid, cname, cnt) for (cid, cname), cnt in global_counter.items()]
     pd.DataFrame(global_rows, columns=["category_id", "name", "count"]).to_csv(
-        REPORT_DIR / "categories_catalog_global.csv", index=False
+        REPORT_DIR / "categories_global.csv", index=False
     )
+    # Inconsistencias id->name
+    inconsistencies = {
+        cid: sorted(list(names)) for cid, names in id_to_names.items() if len(names) > 1
+    }
+    if inconsistencies:
+        with (REPORT_DIR / "categories_inconsistencies.json").open(
+            "w", encoding="utf-8"
+        ) as f:
+            json.dump(inconsistencies, f, ensure_ascii=False, indent=2)
 
-    # reporte rápido en consola y aviso de posibles inconsistencias id->name
-    print("=== CATEGORIES CATALOG (top 20 global) ===")
-    for cid, cname, cnt in global_rows[:10]:
-        print(f"{cid:>6} | {cname:<35} {cnt:>6}")
+    print("=== CATEGORY CATALOG ===")
+    print(f"Global categories: {len(global_counter)}")
+    print(f"Inconsistencies id->name: {len(inconsistencies)} (ver categories_inconsistencies.json)")
 
-    conflicts = {cid: names for cid, names in id_to_names.items() if len(names) > 1}
-    if conflicts:
-        print("\nPosibles inconsistencias id->name detectadas (mismo id con varios names):")
-        for cid, names in list(conflicts.items())[:15]:
-            print(f"  {cid}: {sorted(names)}")
-        if len(conflicts) > 15:
-            print(f"  ... y {len(conflicts)-15} ids más")
 
-    print(f"\nCSVs creados: per_city/categories_catalog_<city>.csv y categories_catalog_global.csv en {REPORT_DIR.resolve()}")
-
-# -----------------------------
-# 5) Variantes de 'city' por fichero (frecuencia)
-# -----------------------------
-from collections import Counter
-
-def catalog_city_variants():
-    """
-    Recorre los ALL_POIS_*_prof_filtered.json y cuenta las variantes de 'city'.
-    Exporta un CSV por ciudad con (city_value, count) y muestra top en consola.
-    """
-    print("\n=== CITY VARIANTS (per file) ===")
-    out_dir = REPORT_DIR / "per_city"
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    for city, path in POIS_BY_CITY.items():
-        data = load_json_list(path)
-        vals = [ (o.get("city") or "").strip() for o in data ]
-        ctr = Counter([v for v in vals if v])
-        rows = sorted(ctr.items(), key=lambda x: (-x[1], x[0]))
-        # guarda CSV
-        pd.DataFrame(rows, columns=["city_value", "count"]).to_csv(
-            out_dir / f"city_variants_{city}.csv", index=False
-        )
-        # imprime top 10
-        print(f"[{city}] total non-empty variants: {len(ctr)}")
-        for val, cnt in rows[:10]:
-            print(f"  {val}  ->  {cnt}")
-    print(f"🗂️  CSVs creados: per_city/city_variants_<city>.csv en {REPORT_DIR.resolve()}")
-
-# -----------------------------
-# main
-# -----------------------------
 def main():
     std_df = summarize_std(STD_CLEAN)
-    per_city_summary, _ = summarize_prof_jsons()
-    coverage_std_vs_prof(std_df, per_city_summary)
-
-    print(f"📝 Reportes CSV/TXT generados en: {REPORT_DIR.resolve()}")
-    print("Listados útiles:")
-    print("  - std_city_distribution.csv")
-    print("  - per_city/top_categories_<city>.csv")
-    print("  - per_city/fsq_ids_<city>.csv")
-    print("  - missing/missing_ids_<city>.txt")
-
-    std_df = summarize_std(STD_CLEAN)
-    per_city_summary, _ = summarize_prof_jsons()
-    coverage_std_vs_prof(std_df, per_city_summary)
+    summarize_pois()
+    coverage_std_vs_pois(std_df)
     catalog_categories()
-    print(f"📝 Reportes CSV/TXT generados en: {REPORT_DIR.resolve()}")
 
-    # Variantes de 'city' por fichero
-    catalog_city_variants()
 
 if __name__ == "__main__":
     main()
