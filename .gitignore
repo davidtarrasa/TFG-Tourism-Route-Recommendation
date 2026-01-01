@@ -209,6 +209,9 @@ __marimo__/
 # Ignorar claves/API tokens
 .env
 
+# Ignorar documentos locales grandes/no versionables
+TFG_estructura_y_plan.pdf
+
 # Ignorar carpetas de datos locales, pero permitir procesados y placeholders
 data/
 !data/README.md
