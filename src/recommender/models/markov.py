@@ -2,20 +2,22 @@
 Modelos secuenciales:
 - Matriz de transiciones POI→POI y categoría→categoría.
 - Dado current_poi o current_category, sugerir siguientes con mayor probabilidad.
-- Empates: romper por distancia, rating, etc.
+- Empates: se resolverán en el scorer (distancia, rating, etc.).
 """
 
-
-def build_transition_matrices():
-    # TODO: construir transiciones a partir de visits (ordenadas por trail/timestamp).
-    raise NotImplementedError
+from typing import Dict, List, Tuple
 
 
-def next_poi(current_poi, transitions_poi):
-    # TODO: devolver candidatos ordenados por probabilidad.
-    raise NotImplementedError
+def next_poi(current_poi: str, transitions_poi: Dict[str, Dict[str, float]], topn: int = 20) -> List[Tuple[str, float]]:
+    """Devuelve candidatos ordenados por probabilidad desde un POI actual."""
+    probs = transitions_poi.get(current_poi, {})
+    return sorted(probs.items(), key=lambda x: x[1], reverse=True)[:topn]
 
 
-def next_category(current_category, transitions_cat):
-    # TODO: devolver candidatos de categorías.
-    raise NotImplementedError
+def next_category(current_category: str, transitions_cat: Dict[str, Dict[str, float]], topn: int = 20) -> List[Tuple[str, float]]:
+    """Devuelve candidatos de categorías ordenados por probabilidad."""
+    probs = transitions_cat.get(current_category, {})
+    return sorted(probs.items(), key=lambda x: x[1], reverse=True)[:topn]
+
+
+__all__ = ["next_poi", "next_category"]
