@@ -19,6 +19,7 @@ from .models.embeddings import score_embeddings, train_embeddings
 from .models.content_based import score_content
 from .models.co_visitation import score_co_visitation
 from .models.markov import next_poi
+from .models.als import score_als
 
 # Categorías que no queremos en el top (salidas raras de Markov)
 EXCLUDE_CATEGORIES = {"Intersection", "State", "Home (private)"}
@@ -40,11 +41,18 @@ def _combine_scores(
     co_scores: Dict[str, float],
     markov_scores: Dict[str, float],
     embed_scores: Optional[Dict[str, float]] = None,
-    weights: Tuple[float, float, float, float] = (0.3, 0.4, 0.3, 0.0),
+    als_scores: Optional[Dict[str, float]] = None,
+    weights: Tuple[float, float, float, float, float] = (0.3, 0.3, 0.3, 0.0, 0.1),
 ) -> Dict[str, float]:
     """Suma ponderada de los motores."""
-    w_content, w_co, w_markov, w_embed = weights
-    all_ids = set(content_scores) | set(co_scores) | set(markov_scores) | (set(embed_scores) if embed_scores else set())
+    w_content, w_co, w_markov, w_embed, w_als = weights
+    all_ids = (
+        set(content_scores)
+        | set(co_scores)
+        | set(markov_scores)
+        | (set(embed_scores) if embed_scores else set())
+        | (set(als_scores) if als_scores else set())
+    )
     combined: Dict[str, float] = {}
     for fid in all_ids:
         combined[fid] = (
@@ -52,6 +60,7 @@ def _combine_scores(
             + w_co * co_scores.get(fid, 0.0)
             + w_markov * markov_scores.get(fid, 0.0)
             + w_embed * (embed_scores.get(fid, 0.0) if embed_scores else 0.0)
+            + w_als * (als_scores.get(fid, 0.0) if als_scores else 0.0)
         )
     return combined
 
@@ -67,6 +76,8 @@ def recommend(
     mode: str = "hybrid",
     use_embeddings: bool = False,
     embeddings_path: Optional[str] = "src/recommender/cache/word2vec.joblib",
+    use_als: bool = False,
+    als_path: Optional[str] = "src/recommender/cache/als_model.joblib",
     lat: Optional[float] = None,
     lon: Optional[float] = None,
     max_price_tier: Optional[int] = None,
@@ -107,11 +118,29 @@ def recommend(
                     os.makedirs(os.path.dirname(embeddings_path), exist_ok=True)
                     joblib.dump(model, embeddings_path)
             if model:
-                embed_scores = score_embeddings(model, user_items, topn=200)
+                embed_scores = score_embeddings(model, user_items, topn=1000)
                 embed_scores = _normalize_scores(embed_scores)
         except ImportError:
             pass
         except ValueError:
+            pass
+
+    als_scores: Dict[str, float] = {}
+    if use_als and mode in ("hybrid", "als"):
+        try:
+            import joblib  # type: ignore
+
+            if als_path and os.path.exists(als_path):
+                als_obj = joblib.load(als_path)
+                model = als_obj["model"]
+                user_to_idx = als_obj["user_to_idx"]
+                item_to_idx = als_obj["item_to_idx"]
+                idx_to_item = als_obj["idx_to_item"]
+                als_scores = score_als(model, user_id or -1, user_items, user_to_idx, item_to_idx, idx_to_item, topn=500)
+                als_scores = _normalize_scores(als_scores)
+        except ImportError:
+            pass
+        except Exception:
             pass
 
     allowed_ids = set(pois_df["fsq_id"].astype(str))
@@ -149,6 +178,7 @@ def recommend(
     co_scores = {k: v for k, v in _normalize_scores(co_scores).items() if k in allowed_ids}
     markov_scores = {k: v for k, v in _normalize_scores(markov_scores).items() if k in allowed_ids}
     embed_scores = {k: v for k, v in _normalize_scores(embed_scores).items() if k in allowed_ids}
+    als_scores = {k: v for k, v in _normalize_scores(als_scores).items() if k in allowed_ids}
 
     # 4) Combinar según modo
     if mode == "content":
@@ -159,19 +189,21 @@ def recommend(
         combined = markov_scores
     elif mode == "embed":
         combined = embed_scores
+    elif mode == "als":
+        combined = als_scores
     else:
-        # Pesos según señales disponibles
+        # Pesos según señales disponibles (reforzamos item/markov)
         if user_items and current_poi:
-            w = (0.5, 0.1, 0.4, 0.0)
+            w = (0.3, 0.25, 0.35, 0.05, 0.05 if als_scores else 0.0)
         elif user_items:
-            w = (0.5, 0.3, 0.2, 0.0)
+            w = (0.3, 0.35, 0.2, 0.05, 0.1 if als_scores else 0.0)
         elif current_poi:
-            w = (0.4, 0.2, 0.4, 0.0)
-        elif embed_scores:
-            w = (0.25, 0.35, 0.25, 0.15)
+            w = (0.2, 0.3, 0.4, 0.05, 0.05 if als_scores else 0.0)
+        elif embed_scores or als_scores:
+            w = (0.25, 0.3, 0.2, 0.15 if embed_scores else 0.0, 0.1 if als_scores else 0.0)
         else:
-            w = (0.6, 0.2, 0.2, 0.0)  # cold-start
-        combined = _combine_scores(content_scores, co_scores, markov_scores, embed_scores, weights=w)
+            w = (0.6, 0.2, 0.2, 0.0, 0.0)  # cold-start
+        combined = _combine_scores(content_scores, co_scores, markov_scores, embed_scores, als_scores, weights=w)
         if not combined and markov_scores:
             combined = markov_scores
 

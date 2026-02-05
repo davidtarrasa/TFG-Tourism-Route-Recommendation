@@ -23,12 +23,14 @@ def main():
     parser.add_argument("--city", help="Filtro sobre pois.city (ej. Osaka)")
     parser.add_argument("--city-qid", dest="city_qid", help="Filtro sobre visits.venue_city (ej. Q406)")
     parser.add_argument("--current-poi", dest="current_poi", help="POI actual para modo Markov/distancia")
-    parser.add_argument("--mode", choices=["hybrid", "content", "item", "markov", "embed"], default="hybrid")
+    parser.add_argument("--mode", choices=["hybrid", "content", "item", "markov", "embed", "als"], default="hybrid")
     parser.add_argument("--k", type=int, default=10, help="Número de resultados")
     parser.add_argument("--visits-limit", dest="visits_limit", type=int, default=50000, help="Límite de visits para features")
     parser.add_argument("--dsn", help="DSN de Postgres (si no, usa POSTGRES_DSN o por defecto)")
     parser.add_argument("--use-embeddings", action="store_true", help="Entrenar/cargar Word2Vec y usar vecinos")
     parser.add_argument("--embeddings-path", help="Ruta para cargar/guardar modelo Word2Vec", default="src/recommender/cache/word2vec.joblib")
+    parser.add_argument("--use-als", action="store_true", help="Usar modelo ALS pre-entrenado (joblib)")
+    parser.add_argument("--als-path", help="Ruta al modelo ALS (joblib)", default="src/recommender/cache/als_model.joblib")
     parser.add_argument("--build-route", action="store_true", help="Ordenar POIs y generar GeoJSON/HTML de la ruta")
     parser.add_argument("--route-output", default="data/reports/routes/route.html", help="Ruta de salida del mapa HTML")
     parser.add_argument("--geojson-output", default="data/reports/routes/route.geojson", help="Ruta de salida del GeoJSON")
@@ -51,6 +53,8 @@ def main():
         mode=args.mode,
         use_embeddings=args.use_embeddings,
         embeddings_path=args.embeddings_path,
+        use_als=args.use_als,
+        als_path=args.als_path,
         lat=args.lat,
         lon=args.lon,
         max_price_tier=args.max_price_tier,
