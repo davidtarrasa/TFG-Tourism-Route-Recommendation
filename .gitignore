@@ -218,6 +218,9 @@ data/
 !data/processed/
 !data/processed/**
 !data/raw/
+
+# Recommender artifacts (trained models / caches)
+src/recommender/cache/*.joblib
 !data/raw/.gitkeep
 
 # Ignorar cosas de Python
