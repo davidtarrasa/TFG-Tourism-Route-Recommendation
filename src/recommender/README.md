@@ -12,6 +12,12 @@ Entradas esperadas (CLI/API)
 - Preferencias: categorías (`--prefs "museum,food"`), precio (`price_tier`, `is_free`), nº de paradas (`--k`), ubicación actual (`--lat --lon`) o `--current-poi`.
 - Modo: `--mode hybrid|markov|content|item` (para debug) y re-ranking por distancia opcional.
 
+`--prefs` (minimalista)
+-----------------------
+Una sola cadena separada por comas que se mapea a filtros/boosts:
+- keywords: `free|paid|cheap|mid|expensive|price:N|max_price:N`
+- otros tokens: se interpretan como preferencias de categorías (se aplica un *boost* si el POI coincide con la categoría primaria o alguna categoría secundaria).
+
 Fuentes de datos y features
 ---------------------------
 - POIs (`pois`): lat, lon, city, rating, price_tier, is_free, primary_category + lista de categorías (`poi_categories`).

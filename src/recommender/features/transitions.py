@@ -45,4 +45,27 @@ def build_transitions(visits_df: pd.DataFrame, poi_df: pd.DataFrame) -> Tuple[Di
     return trans_poi, trans_cat
 
 
-__all__ = ["build_transitions"]
+def build_transitions_order2(visits_df: pd.DataFrame) -> Dict[Tuple[str, str], Dict[str, float]]:
+    """
+    Markov de orden 2: (prev_poi, current_poi) -> next_poi.
+
+    Se normaliza a probabilidades por cada par (prev,current).
+    """
+    if visits_df.empty:
+        return {}
+
+    trans_counts = defaultdict(Counter)
+    visits_df = visits_df.sort_values(["trail_id", "timestamp"])
+
+    for _, group in visits_df.groupby("trail_id"):
+        seq = group["venue_id"].astype(str).tolist()
+        if len(seq) < 3:
+            continue
+        for i in range(len(seq) - 2):
+            a, b, c = seq[i], seq[i + 1], seq[i + 2]
+            trans_counts[(a, b)][c] += 1
+
+    return {k: _normalize(v) for k, v in trans_counts.items()}
+
+
+__all__ = ["build_transitions", "build_transitions_order2"]

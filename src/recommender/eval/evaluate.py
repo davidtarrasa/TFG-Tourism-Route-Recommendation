@@ -21,13 +21,15 @@ import pandas as pd
 
 from ..features.tfidf import build_tfidf
 from ..features.cooccurrence import build_cooccurrence
-from ..features.transitions import build_transitions
+from ..features.transitions import build_transitions, build_transitions_order2
 from ..features.word2vec import sequences_from_visits
 from ..models.content_based import score_content
 from ..models.co_visitation import score_co_visitation
-from ..models.markov import next_poi
-from ..models.embeddings import score_embeddings, train_embeddings
+from ..models.markov import next_poi_order2
+from ..models.embeddings import score_embeddings_next, train_embeddings
+from ..models.als import build_interactions, train_als
 from ..utils_db import get_conn, load_pois, load_poi_categories, load_visits
+from ..config import DEFAULT_CONFIG_PATH, load_config
 
 
 def split_train_test(visits: pd.DataFrame, test_size: int = 1, min_train: int = 1) -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -36,6 +38,30 @@ def split_train_test(visits: pd.DataFrame, test_size: int = 1, min_train: int = 
     train_rows = []
     test_rows = []
     for uid, group in visits.groupby("user_id"):
+        if len(group) <= test_size + min_train - 1:
+            continue
+        test_part = group.tail(test_size)
+        train_part = group.iloc[:-test_size]
+        if len(train_part) < min_train:
+            continue
+        train_rows.append(train_part)
+        test_rows.append(test_part)
+    if not train_rows:
+        return pd.DataFrame(), pd.DataFrame()
+    return pd.concat(train_rows), pd.concat(test_rows)
+
+
+def split_train_test_trails(visits: pd.DataFrame, test_size: int = 1, min_train: int = 1) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Split por trail: para cada trail_id, deja las Ãºltimas `test_size` visitas como test.
+
+    Esto alinea mejor la evaluaciÃ³n con modelos secuenciales (Markov/Word2Vec),
+    porque el "POI actual" y el siguiente pertenecen a la misma ruta/sesiÃ³n.
+    """
+    visits = visits.sort_values(["trail_id", "timestamp"])
+    train_rows = []
+    test_rows = []
+    for tid, group in visits.groupby("trail_id"):
         if len(group) <= test_size + min_train - 1:
             continue
         test_part = group.tail(test_size)
@@ -78,55 +104,154 @@ def eval_modes(
     embeddings_path: Optional[str] = None,
     use_als: bool = False,
     als_path: Optional[str] = None,
+    fair: bool = False,
+    protocol: str = "user",
 ) -> pd.DataFrame:
+    cfg = load_config(DEFAULT_CONFIG_PATH)
+    hyb_cfg = cfg.get("hybrid", {})
+    emb_cfg = cfg.get("embeddings", {})
+    als_cfg = cfg.get("als", {})
+    eval_cfg = cfg.get("eval", {})
     # Features globales sobre train
     tfidf_matrix, tfidf_ids, _ = build_tfidf(poi_cats)
     co_mat, id_to_idx, idx_to_id = build_cooccurrence(train_visits)
     trans_poi, _ = build_transitions(train_visits, pois)
+    trans_poi2 = build_transitions_order2(train_visits)
 
+    # IMPORTANT:
+    # - fair=False (default): load pre-trained models from disk (fast, but can be optimistic).
+    # - fair=True: train models ONLY on train_visits (slower, but leak-free).
     embed_model = None
-    if use_embeddings and embeddings_path:
-        try:
-            import joblib
-            embed_model = joblib.load(embeddings_path)
-        except Exception:
+    if use_embeddings:
+        if (not fair) and embeddings_path:
+            try:
+                import joblib
+                embed_model = joblib.load(embeddings_path)
+            except Exception:
+                embed_model = None
+
+        if embed_model is None:
             seqs = sequences_from_visits(train_visits)
-            embed_model = train_embeddings(seqs)
-            joblib.dump(embed_model, embeddings_path)
+            # Use lighter params under fair evaluation to keep runtime reasonable.
+            e_vector_size = int(eval_cfg.get("emb_vector_size", emb_cfg.get("vector_size", 128))) if fair else int(emb_cfg.get("vector_size", 128))
+            e_window = int(eval_cfg.get("emb_window", emb_cfg.get("window", 15))) if fair else int(emb_cfg.get("window", 15))
+            e_epochs = int(eval_cfg.get("emb_epochs", emb_cfg.get("epochs", 10))) if fair else int(emb_cfg.get("epochs", 10))
+            e_negative = int(eval_cfg.get("emb_negative", emb_cfg.get("negative", 5))) if fair else int(emb_cfg.get("negative", 5))
+            embed_model = train_embeddings(
+                seqs,
+                vector_size=e_vector_size,
+                window=e_window,
+                min_count=int(emb_cfg.get("min_count", 2)),
+                workers=int(emb_cfg.get("workers", 4)),
+                epochs=e_epochs,
+                negative=e_negative,
+                sample=float(emb_cfg.get("sample", 1e-3)),
+                ns_exponent=float(emb_cfg.get("ns_exponent", 0.75)),
+                hs=int(emb_cfg.get("hs", 0)),
+                seed=int(emb_cfg.get("seed", 42)),
+            )
+            if embeddings_path:
+                try:
+                    import joblib
+                    joblib.dump(embed_model, embeddings_path)
+                except Exception:
+                    pass
 
     als_obj = None
-    if use_als and als_path:
-        try:
-            import joblib
-            als_obj = joblib.load(als_path)
-        except Exception:
-            als_obj = None
+    if use_als:
+        if (not fair) and als_path:
+            try:
+                import joblib
+                als_obj = joblib.load(als_path)
+            except Exception:
+                als_obj = None
 
-    users = list(test_visits["user_id"].unique())
+        if als_obj is None:
+            interactions, user_to_idx, item_to_idx, idx_to_item = build_interactions(train_visits)
+            # Use lighter params under fair evaluation to keep runtime reasonable.
+            a_factors = int(eval_cfg.get("als_factors", als_cfg.get("factors", 64))) if fair else int(als_cfg.get("factors", 64))
+            a_reg = float(eval_cfg.get("als_regularization", als_cfg.get("regularization", 0.01))) if fair else float(als_cfg.get("regularization", 0.01))
+            a_iters = int(eval_cfg.get("als_iterations", als_cfg.get("iterations", 15))) if fair else int(als_cfg.get("iterations", 15))
+            a_alpha = float(eval_cfg.get("als_alpha", als_cfg.get("alpha", 40.0))) if fair else float(als_cfg.get("alpha", 40.0))
+            als_model = train_als(
+                interactions,
+                factors=a_factors,
+                regularization=a_reg,
+                iterations=a_iters,
+                alpha=a_alpha,
+            )
+            als_obj = {
+                "model": als_model,
+                "user_to_idx": user_to_idx,
+                "item_to_idx": item_to_idx,
+                "idx_to_item": idx_to_item,
+            }
+            if als_path:
+                try:
+                    import joblib
+                    joblib.dump(als_obj, als_path)
+                except Exception:
+                    pass
+
+    if protocol == "trail":
+        cases = list(test_visits["trail_id"].unique())
+    else:
+        cases = list(test_visits["user_id"].unique())
     if max_users:
-        users = users[:max_users]
+        cases = cases[:max_users]
 
     metrics_acc = defaultdict(list)
     users_evaluated = set()
+    users_skipped_all_truth_seen = 0
 
-    for uid in users:
-        user_train = train_visits[train_visits["user_id"] == uid]
-        user_test = test_visits[test_visits["user_id"] == uid]
-        if user_train.empty or user_test.empty:
-            continue
+    for case_id in cases:
+        # Case context:
+        # - protocol=user  -> evaluate next POI for a user
+        # - protocol=trail -> evaluate next POI inside the same trail/session
+        if protocol == "trail":
+            trail_train = train_visits[train_visits["trail_id"] == case_id].sort_values("timestamp")
+            trail_test = test_visits[test_visits["trail_id"] == case_id].sort_values("timestamp")
+            if trail_train.empty or trail_test.empty:
+                continue
+            uid = int(trail_train.iloc[-1]["user_id"])
 
-        user_items = user_train["venue_id"].astype(str).tolist()
-        truth_items = user_test["venue_id"].astype(str).tolist()
+            # Profile/history-based models (content/item/ALS) can use user history.
+            user_train = train_visits[train_visits["user_id"] == uid].sort_values("timestamp")
+            user_items = user_train["venue_id"].astype(str).tolist()
 
-        # POI actual para Markov: última del train
-        current_poi = user_train.iloc[-1]["venue_id"]
+            # Sequential models (markov/embed) should be anchored in the trail.
+            seq_items = trail_train["venue_id"].astype(str).tolist()
+            seen = set(seq_items)
+            truth_items = [t for t in trail_test["venue_id"].astype(str).tolist() if t not in seen]
+            if not truth_items:
+                users_skipped_all_truth_seen += 1
+                continue
+
+            current_poi = str(seq_items[-1])
+            prev_poi = str(seq_items[-2]) if len(seq_items) >= 2 else None
+        else:
+            uid = int(case_id)
+            user_train = train_visits[train_visits["user_id"] == uid].sort_values("timestamp")
+            user_test = test_visits[test_visits["user_id"] == uid].sort_values("timestamp")
+            if user_train.empty or user_test.empty:
+                continue
+
+            user_items = user_train["venue_id"].astype(str).tolist()
+            seen = set(user_items)
+            truth_items = [t for t in user_test["venue_id"].astype(str).tolist() if t not in seen]
+            if not truth_items:
+                users_skipped_all_truth_seen += 1
+                continue
+
+            current_poi = str(user_train.iloc[-1]["venue_id"])
+            prev_poi = str(user_train.iloc[-2]["venue_id"]) if len(user_train) >= 2 else None
 
         content_scores = score_content(user_items, tfidf_ids, tfidf_matrix)
         co_scores = score_co_visitation(user_items, co_mat, id_to_idx, idx_to_id)
-        markov_scores = dict(next_poi(current_poi, trans_poi, topn=500))
+        markov_scores = dict(next_poi_order2(prev_poi, str(current_poi), trans_poi2, trans_poi, topn=500, backoff=0.3))
         embed_scores = {}
         if embed_model:
-            embed_scores = score_embeddings(embed_model, user_items, topn=1000)
+            embed_scores = score_embeddings_next(embed_model, str(current_poi), topn=int(emb_cfg.get("topn_score", 1000)))
 
         als_scores = {}
         if als_obj:
@@ -139,7 +264,7 @@ def eval_modes(
                 als_obj["user_to_idx"],
                 als_obj["item_to_idx"],
                 als_obj["idx_to_item"],
-                topn=500,
+                topn=int(als_cfg.get("topn_score", 500)),
             )
 
         # Normalizar
@@ -193,23 +318,29 @@ def eval_modes(
             elif mode == "als":
                 rec_scores = als_scores
             else:  # hybrid
-                # Alineado con scorer: más peso a item/markov
                 if user_items and current_poi:
-                    w = (0.3, 0.25, 0.35, 0.05, 0.05 if als_scores else 0.0)
+                    w = list(hyb_cfg.get("user_current", [0.1, 0.15, 0.15, 0.05, 0.55]))
                 elif user_items:
-                    w = (0.3, 0.35, 0.2, 0.05, 0.1 if als_scores else 0.0)
+                    w = list(hyb_cfg.get("user_only", [0.1, 0.2, 0.1, 0.05, 0.55]))
                 elif current_poi:
-                    w = (0.2, 0.3, 0.4, 0.05, 0.05 if als_scores else 0.0)
+                    w = list(hyb_cfg.get("current_only", [0.1, 0.15, 0.35, 0.05, 0.35]))
                 elif embed_scores or als_scores:
-                    w = (0.25, 0.3, 0.2, 0.15 if embed_scores else 0.0, 0.1 if als_scores else 0.0)
+                    w = list(hyb_cfg.get("embed_or_als", [0.15, 0.15, 0.1, 0.15, 0.45]))
                 else:
-                    w = (0.6, 0.2, 0.2, 0.0, 0.0)
+                    w = list(hyb_cfg.get("cold_start", [0.6, 0.2, 0.2, 0.0, 0.0]))
+
+                # If ALS/embeddings are not available, zero their weights.
+                if not als_scores:
+                    w[4] = 0.0
+                if not embed_scores:
+                    w[3] = 0.0
                 rec_scores = combine(*w)
 
             if not rec_scores:
                 continue
             recs_sorted = sorted(rec_scores.items(), key=lambda x: x[1], reverse=True)
-            rec_ids = [r[0] for r in recs_sorted[:k]]
+            # Evaluate against *new* POIs -> remove already-seen items from the recommendation list.
+            rec_ids = [r[0] for r in recs_sorted if r[0] not in seen][:k]
             m = compute_metrics(rec_ids, truth_items, k)
             for key, val in m.items():
                 metrics_acc[(mode, key)].append(val)
@@ -219,7 +350,10 @@ def eval_modes(
     rows = []
     for (mode, metric), vals in metrics_acc.items():
         rows.append({"mode": mode, "metric": metric, "value": float(np.mean(vals)) if vals else 0.0, "n_users": len(vals)})
-    summary = {"users_evaluated": len(users_evaluated)}
+    summary = {
+        "users_evaluated": len(users_evaluated),
+        "users_skipped_all_truth_seen": users_skipped_all_truth_seen,
+    }
     return pd.DataFrame(rows), summary
 
 
@@ -230,12 +364,23 @@ def main():
     parser.add_argument("--k", type=int, default=10, help="Top-K para métricas")
     parser.add_argument("--test-size", type=int, default=1, help="Últimas visitas al test")
     parser.add_argument("--min-train", type=int, default=1, help="Mínimo de visitas en train por usuario")
+    parser.add_argument(
+        "--protocol",
+        choices=["user", "trail"],
+        default="user",
+        help="Como se hace el split: user (por usuario) o trail (por ruta).",
+    )
     parser.add_argument("--max-users", type=int, help="Limitar número de usuarios evaluados")
     parser.add_argument("--visits-limit", type=int, help="Limitar visits para acelerar")
     parser.add_argument("--use-embeddings", action="store_true", help="Usar embeddings Word2Vec si existen")
     parser.add_argument("--embeddings-path", help="Ruta del modelo Word2Vec", default="src/recommender/cache/word2vec.joblib")
     parser.add_argument("--use-als", action="store_true", help="Usar modelo ALS si existe")
     parser.add_argument("--als-path", help="Ruta del modelo ALS", default="src/recommender/cache/als_model.joblib")
+    parser.add_argument(
+        "--fair",
+        action="store_true",
+        help="Entrena modelos SOLO con el split de train (mÃ¡s lento, sin fuga de informaciÃ³n).",
+    )
     parser.add_argument("--modes", nargs="+", default=["hybrid", "content", "item", "markov", "embed", "als"], help="Modos a evaluar")
     parser.add_argument("--output", help="Guardar resultados en JSON/CSV (según extensión)")
     args = parser.parse_args()
@@ -245,7 +390,10 @@ def main():
     pois = load_pois(conn, city=args.city)
     poi_cats = load_poi_categories(conn, fsq_ids=pois["fsq_id"])
 
-    train_visits, test_visits = split_train_test(visits, test_size=args.test_size, min_train=args.min_train)
+    if args.protocol == 'trail':
+        train_visits, test_visits = split_train_test_trails(visits, test_size=args.test_size, min_train=args.min_train)
+    else:
+        train_visits, test_visits = split_train_test(visits, test_size=args.test_size, min_train=args.min_train)
     if train_visits.empty or test_visits.empty:
         raise SystemExit("Sin datos suficientes para evaluar (ajusta test-size/min-train).")
 
@@ -261,6 +409,8 @@ def main():
         embeddings_path=args.embeddings_path,
         use_als=args.use_als,
         als_path=args.als_path,
+        fair=args.fair,
+        protocol=args.protocol,
     )
 
     if args.output:
@@ -279,6 +429,7 @@ def main():
         print("Sin métricas (¿sin usuarios válidos?).")
     else:
         print(f"Usuarios evaluados: {summary.get('users_evaluated', 0)}")
+        print(f"Usuarios saltados (test todo repetido): {summary.get('users_skipped_all_truth_seen', 0)}")
         print(df_metrics.pivot(index="mode", columns="metric", values="value"))
 
 

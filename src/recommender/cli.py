@@ -10,6 +10,7 @@ import sys
 import pandas as pd
 
 from .scorer import recommend
+from .prefs import parse_prefs
 
 
 def main():
@@ -38,9 +39,15 @@ def main():
     parser.add_argument("--lon", type=float, help="Longitud actual para re-ranking por distancia")
     parser.add_argument("--max-price-tier", dest="max_price_tier", type=int, help="Filtrar por price_tier <= valor")
     parser.add_argument("--free-only", dest="free_only", action="store_true", help="Filtrar solo POIs gratuitos")
+    parser.add_argument(
+        "--prefs",
+        help='Preferencias en una cadena separada por comas (ej: "museum,park,free,cheap")',
+    )
     parser.add_argument("--distance-weight", dest="distance_weight", type=float, default=0.3, help="Peso penalización distancia [0-1]")
     parser.add_argument("--no-diversify", dest="diversify", action="store_false", help="Desactivar diversidad por categoría")
     args = parser.parse_args()
+
+    prefs = parse_prefs(args.prefs)
 
     df = recommend(
         dsn=args.dsn,
@@ -59,6 +66,7 @@ def main():
         lon=args.lon,
         max_price_tier=args.max_price_tier,
         free_only=args.free_only,
+        prefs=prefs,
         distance_weight=args.distance_weight,
         diversify=args.diversify,
     )

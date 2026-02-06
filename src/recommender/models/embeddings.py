@@ -9,12 +9,18 @@ from typing import List, Tuple, Dict
 
 def train_embeddings(
     sequences: List[List[str]],
-    vector_size: int = 64,
-    window: int = 10,
+    vector_size: int = 128,
+    window: int = 15,
     min_count: int = 2,
-    workers: int = 2,
+    workers: int = 4,
+    epochs: int = 10,
+    negative: int = 5,
+    sample: float = 1e-3,
+    ns_exponent: float = 0.75,
+    hs: int = 0,
+    seed: int = 42,
 ):
-    """Entrena un modelo Word2Vec (Skip-gram)."""
+    """Entrena un modelo Word2Vec (Skip-gram) sobre secuencias de POIs."""
     try:
         from gensim.models import Word2Vec
     except ImportError as exc:
@@ -29,6 +35,12 @@ def train_embeddings(
         min_count=min_count,
         sg=1,
         workers=workers,
+        epochs=epochs,
+        negative=negative,
+        sample=sample,
+        ns_exponent=ns_exponent,
+        hs=hs,
+        seed=seed,
     )
     return model
 
@@ -38,6 +50,18 @@ def similar_pois(model, poi_id: str, topn: int = 20) -> List[Tuple[str, float]]:
     if poi_id not in model.wv:
         return []
     return model.wv.most_similar(poi_id, topn=topn)
+
+
+def score_embeddings_next(model, current_poi: str, topn: int = 50) -> Dict[str, float]:
+    """Score "next POI" usando solo el POI actual (secuencial)."""
+    if current_poi not in model.wv:
+        return {}
+    out: Dict[str, float] = {}
+    for pid, sim in model.wv.most_similar(current_poi, topn=topn):
+        if pid == current_poi:
+            continue
+        out[pid] = float(sim)
+    return out
 
 
 def score_embeddings(model, user_items: List[str], topn: int = 20) -> Dict[str, float]:
@@ -56,4 +80,4 @@ def score_embeddings(model, user_items: List[str], topn: int = 20) -> Dict[str, 
     return dict(scores)
 
 
-__all__ = ["train_embeddings", "similar_pois", "score_embeddings"]
+__all__ = ["train_embeddings", "similar_pois", "score_embeddings_next", "score_embeddings"]

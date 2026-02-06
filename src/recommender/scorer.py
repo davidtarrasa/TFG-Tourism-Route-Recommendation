@@ -13,16 +13,37 @@ import pandas as pd
 from .features.load_data import load_all
 from .features.tfidf import build_tfidf
 from .features.cooccurrence import build_cooccurrence
-from .features.transitions import build_transitions
+from .features.transitions import build_transitions, build_transitions_order2
 from .features.word2vec import sequences_from_visits
-from .models.embeddings import score_embeddings, train_embeddings
+from .models.embeddings import score_embeddings, score_embeddings_next, train_embeddings
 from .models.content_based import score_content
 from .models.co_visitation import score_co_visitation
-from .models.markov import next_poi
+from .models.markov import next_poi, next_poi_order2
 from .models.als import score_als
+from .config import DEFAULT_CONFIG_PATH, load_config
+from .prefs import Prefs, normalize_categories
 
-# Categorías que no queremos en el top (salidas raras de Markov)
-EXCLUDE_CATEGORIES = {"Intersection", "State", "Home (private)"}
+_CFG = None
+
+
+def _get_cfg():
+    global _CFG
+    if _CFG is None:
+        _CFG = load_config(DEFAULT_CONFIG_PATH)
+    return _CFG
+
+
+def _cfg_get(path: str, default):
+    cur = _get_cfg()
+    for part in path.split("."):
+        if not isinstance(cur, dict) or part not in cur:
+            return default
+        cur = cur[part]
+    return cur
+
+
+# Categorias que no queremos en el top (salidas raras de Markov)
+EXCLUDE_CATEGORIES = set(_cfg_get("filters.exclude_categories", ["Intersection", "State", "Home (private)"]))
 
 
 def _normalize_scores(scores: Dict[str, float]) -> Dict[str, float]:
@@ -82,6 +103,7 @@ def recommend(
     lon: Optional[float] = None,
     max_price_tier: Optional[int] = None,
     free_only: bool = False,
+    prefs: Optional[Prefs] = None,
     distance_weight: float = 0.3,
     diversify: bool = True,
 ) -> pd.DataFrame:
@@ -89,6 +111,12 @@ def recommend(
     Devuelve un DataFrame top-K con columnas:
     fsq_id, name, city, primary_category, rating, price_tier, is_free, score (+ distance_km si aplica).
     """
+    cfg = load_config(DEFAULT_CONFIG_PATH)
+    hyb_cfg = cfg.get("hybrid", {})
+    emb_cfg = cfg.get("embeddings", {})
+    als_cfg = cfg.get("als", {})
+    prefs_cfg = cfg.get("prefs", {})
+
     # 1) Cargar datos (filtra por ciudad si se pasa)
     visits_df, pois_df, poi_cats_df = load_all(dsn=dsn, city=city, city_qid=city_qid, visits_limit=visits_limit)
 
@@ -101,6 +129,7 @@ def recommend(
     tfidf_matrix, tfidf_ids, _ = build_tfidf(poi_cats_df)
     co_mat, id_to_idx, idx_to_id = build_cooccurrence(visits_df)
     trans_poi, trans_cat = build_transitions(visits_df, pois_df)
+    trans_poi2 = build_transitions_order2(visits_df)
 
     # Embeddings opcionales
     embed_scores: Dict[str, float] = {}
@@ -113,12 +142,28 @@ def recommend(
                 model = joblib.load(embeddings_path)
             else:
                 seqs = sequences_from_visits(visits_df)
-                model = train_embeddings(seqs)
+                model = train_embeddings(
+                    seqs,
+                    vector_size=int(emb_cfg.get("vector_size", 128)),
+                    window=int(emb_cfg.get("window", 15)),
+                    min_count=int(emb_cfg.get("min_count", 2)),
+                    workers=int(emb_cfg.get("workers", 4)),
+                    epochs=int(emb_cfg.get("epochs", 10)),
+                    negative=int(emb_cfg.get("negative", 5)),
+                    sample=float(emb_cfg.get("sample", 1e-3)),
+                    ns_exponent=float(emb_cfg.get("ns_exponent", 0.75)),
+                    hs=int(emb_cfg.get("hs", 0)),
+                    seed=int(emb_cfg.get("seed", 42)),
+                )
                 if embeddings_path:
                     os.makedirs(os.path.dirname(embeddings_path), exist_ok=True)
                     joblib.dump(model, embeddings_path)
             if model:
-                embed_scores = score_embeddings(model, user_items, topn=1000)
+                topn = int(emb_cfg.get("topn_score", 1000))
+                if current_poi:
+                    embed_scores = score_embeddings_next(model, str(current_poi), topn=topn)
+                else:
+                    embed_scores = score_embeddings(model, user_items, topn=topn)
                 embed_scores = _normalize_scores(embed_scores)
         except ImportError:
             pass
@@ -136,7 +181,15 @@ def recommend(
                 user_to_idx = als_obj["user_to_idx"]
                 item_to_idx = als_obj["item_to_idx"]
                 idx_to_item = als_obj["idx_to_item"]
-                als_scores = score_als(model, user_id or -1, user_items, user_to_idx, item_to_idx, idx_to_item, topn=500)
+                als_scores = score_als(
+                    model,
+                    user_id or -1,
+                    user_items,
+                    user_to_idx,
+                    item_to_idx,
+                    idx_to_item,
+                    topn=int(als_cfg.get("topn_score", 500)),
+                )
                 als_scores = _normalize_scores(als_scores)
         except ImportError:
             pass
@@ -150,7 +203,14 @@ def recommend(
     co_scores = score_co_visitation(user_items, co_mat, id_to_idx, idx_to_id) if mode in ("hybrid", "item", "embed") else {}
     markov_scores = {}
     if mode in ("hybrid", "markov", "embed") and current_poi:
-        markov_scores = dict(next_poi(current_poi, trans_poi, topn=200))
+        prev_poi = None
+        if user_items:
+            # Best-effort previous POI from history.
+            if len(user_items) >= 2 and str(user_items[-1]) == str(current_poi):
+                prev_poi = str(user_items[-2])
+            else:
+                prev_poi = str(user_items[-1])
+        markov_scores = dict(next_poi_order2(prev_poi, str(current_poi), trans_poi2, trans_poi, topn=500, backoff=0.3))
         # Si no hay transiciones POI→POI, usar transiciones de categoría del POI actual
         if not markov_scores:
             current_row = pois_df[pois_df["fsq_id"] == current_poi]
@@ -194,15 +254,20 @@ def recommend(
     else:
         # Pesos según señales disponibles (reforzamos item/markov)
         if user_items and current_poi:
-            w = (0.3, 0.25, 0.35, 0.05, 0.05 if als_scores else 0.0)
+            w = list(hyb_cfg.get("user_current", [0.1, 0.15, 0.15, 0.05, 0.55]))
         elif user_items:
-            w = (0.3, 0.35, 0.2, 0.05, 0.1 if als_scores else 0.0)
+            w = list(hyb_cfg.get("user_only", [0.1, 0.2, 0.1, 0.05, 0.55]))
         elif current_poi:
-            w = (0.2, 0.3, 0.4, 0.05, 0.05 if als_scores else 0.0)
+            w = list(hyb_cfg.get("current_only", [0.1, 0.15, 0.35, 0.05, 0.35]))
         elif embed_scores or als_scores:
-            w = (0.25, 0.3, 0.2, 0.15 if embed_scores else 0.0, 0.1 if als_scores else 0.0)
+            w = list(hyb_cfg.get("embed_or_als", [0.15, 0.15, 0.1, 0.15, 0.45]))
         else:
-            w = (0.6, 0.2, 0.2, 0.0, 0.0)  # cold-start
+            w = list(hyb_cfg.get("cold_start", [0.6, 0.2, 0.2, 0.0, 0.0]))  # cold-start
+
+        if not als_scores:
+            w[4] = 0.0
+        if not embed_scores:
+            w[3] = 0.0
         combined = _combine_scores(content_scores, co_scores, markov_scores, embed_scores, als_scores, weights=w)
         if not combined and markov_scores:
             combined = markov_scores
@@ -241,11 +306,52 @@ def recommend(
     if not candidates.empty:
         candidates = candidates[~candidates["primary_category"].isin(EXCLUDE_CATEGORIES)]
 
-    if free_only:
+    # Preferences can set/override filters.
+    if prefs is not None:
+        if prefs.free_only is True:
+            free_only = True
+        elif prefs.free_only is False:
+            # Only paid
+            free_only = False
+        if prefs.max_price_tier is not None:
+            max_price_tier = prefs.max_price_tier
+
+    if prefs is not None and prefs.free_only is False:
+        candidates = candidates[candidates["is_free"] == False]  # noqa: E712
+    elif free_only:
         candidates = candidates[candidates["is_free"] == True]  # noqa: E712
     if max_price_tier is not None:
         candidates["price_tier"] = pd.to_numeric(candidates["price_tier"], errors="coerce")
         candidates = candidates[(candidates["price_tier"].isna()) | (candidates["price_tier"] <= max_price_tier)]
+
+    # Category preference boost (soft, not a hard filter).
+    if prefs is not None and prefs.categories and not candidates.empty:
+        pref_cats = set([c.lower() for c in normalize_categories(prefs.categories)])
+        if pref_cats:
+            # Build a per-POI set of category names (including primary_category).
+            cats_by_id = (
+                poi_cats_df.groupby("fsq_id")["category_name"].apply(lambda s: set([str(x).lower() for x in s.dropna().tolist()]))
+                if not poi_cats_df.empty
+                else pd.Series(dtype=object)
+            )
+
+            def _matches(fid: str, primary: Optional[str]) -> bool:
+                s = set()
+                if primary:
+                    s.add(str(primary).lower())
+                extra = cats_by_id.get(fid)
+                if isinstance(extra, set):
+                    s |= extra
+                return bool(s & pref_cats)
+
+            boost = float(prefs_cfg.get("category_boost", 0.2))
+            candidates["pref_match"] = candidates.apply(
+                lambda r: _matches(str(r["fsq_id"]), r.get("primary_category")),
+                axis=1,
+            )
+            candidates.loc[candidates["pref_match"] == True, "score"] = candidates.loc[  # noqa: E712
+                candidates["pref_match"] == True, "score"
+            ] * (1.0 + boost)
 
     # Re-ranking por distancia si hay ancla
     anchor_lat, anchor_lon = lat, lon
