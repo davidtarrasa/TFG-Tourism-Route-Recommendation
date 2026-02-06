@@ -19,8 +19,13 @@ def get_conn(dsn: Optional[str] = None):
     return psycopg.connect(dsn)
 
 
-def load_pois(conn, city: Optional[str] = None, columns: Optional[Iterable[str]] = None) -> pd.DataFrame:
-    """Carga POIs; opcionalmente filtra por city (coincide con la columna pois.city)."""
+def load_pois(
+    conn,
+    city: Optional[str] = None,
+    city_qid: Optional[str] = None,
+    columns: Optional[Iterable[str]] = None,
+) -> pd.DataFrame:
+    """Carga POIs; opcionalmente filtra por city (pois.city) y/o city_qid (pois.city_qid)."""
     cols = (
         columns
         or [
@@ -29,6 +34,7 @@ def load_pois(conn, city: Optional[str] = None, columns: Optional[Iterable[str]]
             "lat",
             "lon",
             "city",
+            "city_qid",
             "country",
             "rating",
             "price_tier",
@@ -38,9 +44,17 @@ def load_pois(conn, city: Optional[str] = None, columns: Optional[Iterable[str]]
         ]
     )
     base = f"SELECT {', '.join(cols)} FROM pois"
+    clauses = []
+    params = {}
     if city:
-        return pd.read_sql(f"{base} WHERE city ILIKE %(city)s", conn, params={"city": city})
-    return pd.read_sql(base, conn)
+        clauses.append("city ILIKE %(city)s")
+        params["city"] = city
+    if city_qid:
+        clauses.append("city_qid = %(city_qid)s")
+        params["city_qid"] = city_qid
+    if clauses:
+        return pd.read_sql(f"{base} WHERE " + " AND ".join(clauses), conn, params=params)
+    return pd.read_sql(base, conn, params=None)
 
 
 def load_poi_categories(conn, fsq_ids: Optional[Iterable[str]] = None) -> pd.DataFrame:

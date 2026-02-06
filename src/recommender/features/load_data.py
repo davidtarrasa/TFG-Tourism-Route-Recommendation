@@ -36,14 +36,8 @@ def load_all(
     # Use DSN if provided; otherwise get_conn() falls back to POSTGRES_DSN/DEFAULT_DSN.
     with get_conn(dsn) as conn:
         visits_df = load_visits(conn, city_qid=city_qid, limit=visits_limit)
-        pois_df = load_pois(conn, city=city)
-
-        # If the user filters by city_qid (visits) but not by city name (pois),
-        # restrict the candidate POIs to those that appear in the visits for that city.
-        # This avoids cross-city leakage in cold-start / popularity fallback.
-        if city_qid and not city and not visits_df.empty:
-            venue_ids = visits_df["venue_id"].astype(str).dropna().unique().tolist()
-            pois_df = pois_df[pois_df["fsq_id"].astype(str).isin(venue_ids)].copy()
+        # Filter POIs by city name and/or city_qid (requires pois.city_qid populated by ETL).
+        pois_df = load_pois(conn, city=city, city_qid=city_qid)
 
         poi_cats_df = load_poi_categories(conn, fsq_ids=pois_df["fsq_id"])
     return visits_df, pois_df, poi_cats_df

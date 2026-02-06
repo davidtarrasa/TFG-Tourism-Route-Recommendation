@@ -9,7 +9,8 @@ Entradas esperadas (CLI/API)
 ----------------------------
 - `--user-id`: opcional. Si existe en `visits`, habilita CF/Markov personal.
 - `--city`: filtra candidatos (matching con `pois.city`).
-- Preferencias: categorías (`--prefs "museum,food"`), precio (`price_tier`, `is_free`), nº de paradas (`--k`), ubicación actual (`--lat --lon`) o `--current-poi`.
+- `--city-qid`: filtra por ciudad usando el QID de Wikidata (coherente entre `visits.venue_city` y `pois.city_qid`).
+- Preferencias: categorÃ­as (`--prefs "museum,food"`), precio (`price_tier`, `is_free`), nÂº de paradas (`--k`), ubicaciÃ³n actual (`--lat --lon`) o `--current-poi`.
 - Modo: `--mode hybrid|markov|content|item` (para debug) y re-ranking por distancia opcional.
 
 `--prefs` (minimalista)

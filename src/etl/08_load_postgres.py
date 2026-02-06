@@ -32,7 +32,7 @@ def copy_csv(conn, csv_path: Path, table: str):
     print(f"[8/8] Cargado CSV -> {table}")
 
 
-def insert_pois(conn, pois: list):
+def insert_pois(conn, pois: list, city_qid: str | None = None):
     rows = [
         (
             p.get("fsq_id"),
@@ -40,6 +40,7 @@ def insert_pois(conn, pois: list):
             p.get("lat"),
             p.get("lon"),
             p.get("city"),
+            city_qid,
             p.get("country"),
             p.get("rating"),
             p.get("price"),
@@ -52,11 +53,12 @@ def insert_pois(conn, pois: list):
     with conn.cursor() as cur:
         cur.executemany(
             """
-            INSERT INTO pois (fsq_id, name, lat, lon, city, country, rating, price_tier, total_ratings, primary_category, is_free)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            INSERT INTO pois (fsq_id, name, lat, lon, city, city_qid, country, rating, price_tier, total_ratings, primary_category, is_free)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             ON CONFLICT (fsq_id) DO UPDATE
             SET name=EXCLUDED.name, lat=EXCLUDED.lat, lon=EXCLUDED.lon,
-                city=EXCLUDED.city, country=EXCLUDED.country, rating=EXCLUDED.rating,
+                city=EXCLUDED.city, city_qid=EXCLUDED.city_qid,
+                country=EXCLUDED.country, rating=EXCLUDED.rating,
                 price_tier=EXCLUDED.price_tier, total_ratings=EXCLUDED.total_ratings,
                 primary_category=EXCLUDED.primary_category, is_free=EXCLUDED.is_free
             """,
@@ -111,7 +113,7 @@ def main():
                 print(f"[8/8] Aviso: no se encontró {pois_path}, salto ciudad")
                 continue
             pois = load_json_list(str(pois_path))
-            insert_pois(conn, pois)
+            insert_pois(conn, pois, city_qid=cfg.get("qid"))
             insert_poi_categories(conn, pois)
 
     print("[8/8] Carga en Postgres finalizada")

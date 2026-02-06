@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS pois (
   lat double precision,
   lon double precision,
   city text,
+  city_qid text,
   country text,
   rating double precision,
   price_tier integer,
@@ -27,7 +28,11 @@ CREATE TABLE IF NOT EXISTS pois (
   is_free boolean DEFAULT false
 );
 CREATE INDEX IF NOT EXISTS idx_pois_city ON pois(city);
+CREATE INDEX IF NOT EXISTS idx_pois_city_qid ON pois(city_qid);
 CREATE INDEX IF NOT EXISTS idx_pois_primary_cat ON pois(primary_category);
+
+-- Backward-compatible migrations (when table already exists)
+ALTER TABLE pois ADD COLUMN IF NOT EXISTS city_qid text;
 
 CREATE TABLE IF NOT EXISTS poi_categories (
   fsq_id text REFERENCES pois(fsq_id) ON DELETE CASCADE,
