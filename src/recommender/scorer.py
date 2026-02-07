@@ -15,13 +15,19 @@ from .features.tfidf import build_tfidf
 from .features.cooccurrence import build_cooccurrence
 from .features.transitions import build_transitions, build_transitions_order2
 from .features.word2vec import sequences_from_visits
-from .models.embeddings import score_embeddings, score_embeddings_next, train_embeddings
+from .models.embeddings import (
+    score_embeddings,
+    score_embeddings_context,
+    score_embeddings_next,
+    train_embeddings,
+)
 from .models.content_based import score_content
 from .models.co_visitation import score_co_visitation
 from .models.markov import next_poi, next_poi_order2
 from .models.als import score_als
 from .config import DEFAULT_CONFIG_PATH, load_config
 from .prefs import Prefs, normalize_categories
+from .route_planner import plan_route
 
 _CFG = None
 
@@ -55,6 +61,37 @@ def _normalize_scores(scores: Dict[str, float]) -> Dict[str, float]:
     if vmax <= 0:
         return {}
     return {k: v / vmax for k, v in scores.items()}
+
+
+def _apply_hub_penalty(scores: Dict[str, float], item_counts: Dict[str, int], alpha: float) -> Dict[str, float]:
+    """
+    Penalize extremely popular items (hubs) to reduce generic recommendations.
+
+    score' = score / (count ** alpha)
+    - alpha=0 -> no change
+    """
+    if not scores:
+        return {}
+    if alpha <= 0:
+        return scores
+    out: Dict[str, float] = {}
+    for k, v in scores.items():
+        c = float(item_counts.get(str(k), 1))
+        out[str(k)] = float(v) / (c**alpha if c > 0 else 1.0)
+    return out
+
+
+def _embedding_context(user_items: List[str], current_poi: Optional[str], context_n: int) -> List[str]:
+    ctx = [str(x) for x in user_items if x]
+    if current_poi:
+        # Keep current_poi as the most recent item in the context.
+        ctx = [x for x in ctx if x != str(current_poi)]
+        ctx.append(str(current_poi))
+    if not ctx:
+        return []
+    if context_n <= 0:
+        return ctx[-1:]
+    return ctx[-context_n:]
 
 
 def _combine_scores(
@@ -115,6 +152,8 @@ def recommend(
     hyb_cfg = cfg.get("hybrid", {})
     emb_cfg = cfg.get("embeddings", {})
     als_cfg = cfg.get("als", {})
+    markov_cfg = cfg.get("markov", {})
+    route_pl_cfg = cfg.get("route_planner", {})
     prefs_cfg = cfg.get("prefs", {})
 
     # 1) Cargar datos (filtra por ciudad si se pasa)
@@ -124,6 +163,9 @@ def recommend(
     user_items: List[str] = []
     if user_id is not None:
         user_items = visits_df[visits_df["user_id"] == user_id]["venue_id"].astype(str).tolist()
+
+    # Popularity counts for hub penalty (avoid ultra-popular POIs dominating results).
+    item_counts: Dict[str, int] = visits_df["venue_id"].astype(str).value_counts().to_dict()
 
     # 2) Features
     tfidf_matrix, tfidf_ids, _ = build_tfidf(poi_cats_df)
@@ -160,11 +202,16 @@ def recommend(
                     joblib.dump(model, embeddings_path)
             if model:
                 topn = int(emb_cfg.get("topn_score", 1000))
-                if current_poi:
-                    embed_scores = score_embeddings_next(model, str(current_poi), topn=topn)
+                ctx_n = int(emb_cfg.get("context_n", 1))
+                ctx = _embedding_context(user_items=user_items, current_poi=current_poi, context_n=ctx_n)
+                if len(ctx) >= 2:
+                    emb_raw = score_embeddings_context(model, ctx, topn=topn)
+                elif current_poi:
+                    emb_raw = score_embeddings_next(model, str(current_poi), topn=topn)
                 else:
-                    embed_scores = score_embeddings(model, user_items, topn=topn)
-                embed_scores = _normalize_scores(embed_scores)
+                    emb_raw = score_embeddings(model, user_items, topn=topn)
+                emb_raw = _apply_hub_penalty(emb_raw, item_counts=item_counts, alpha=float(emb_cfg.get("hub_alpha", 0.0)))
+                embed_scores = _normalize_scores(emb_raw)
         except ImportError:
             pass
         except ValueError:
@@ -210,7 +257,7 @@ def recommend(
                 prev_poi = str(user_items[-2])
             else:
                 prev_poi = str(user_items[-1])
-        markov_scores = dict(next_poi_order2(prev_poi, str(current_poi), trans_poi2, trans_poi, topn=500, backoff=0.3))
+        markov_scores = dict(next_poi_order2(prev_poi, str(current_poi), trans_poi2, trans_poi, topn=2000, backoff=0.3))
         # Si no hay transiciones POI→POI, usar transiciones de categoría del POI actual
         if not markov_scores:
             current_row = pois_df[pois_df["fsq_id"] == current_poi]
@@ -232,6 +279,9 @@ def recommend(
                             dest_cat = row["primary_category"]
                             scores[row["fsq_id"]] = cat_probs.get(dest_cat, 0) * (0.7 + 0.3 * row["r_norm"])
                         markov_scores = scores
+
+        # Hub penalty: discourage recommending the same ultra-popular POIs everywhere.
+        markov_scores = _apply_hub_penalty(markov_scores, item_counts=item_counts, alpha=float(markov_cfg.get("hub_alpha", 0.0)))
 
     # Normalizar y limitar a POIs con metadatos
     content_scores = {k: v for k, v in _normalize_scores(content_scores).items() if k in allowed_ids}
@@ -378,16 +428,18 @@ def recommend(
 
     # Diversidad básica por categoría (si se solicita)
     if diversify and not candidates.empty:
-        seen_cats = set()
+        max_per_cat = int(route_pl_cfg.get("max_per_category", 2))
+        cat_counts: Dict[str, int] = {}
         diversified = []
         for _, row in candidates.sort_values("score", ascending=False).iterrows():
             cat = row.get("primary_category")
             if pd.isna(row.get("name")) or pd.isna(cat):
                 continue
-            if cat in seen_cats:
+            cat = str(cat)
+            if cat_counts.get(cat, 0) >= max_per_cat:
                 continue
             diversified.append(row)
-            seen_cats.add(cat)
+            cat_counts[cat] = cat_counts.get(cat, 0) + 1
             if len(diversified) >= k:
                 break
         if diversified:

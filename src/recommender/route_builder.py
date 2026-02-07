@@ -47,6 +47,10 @@ def two_opt(order: List[int], dist_matrix: np.ndarray, iterations: int = 200) ->
     best = order[:]
     best_len = path_length(best, dist_matrix)
     n = len(order)
+    # Need at least 4 nodes to do a meaningful 2-opt swap. With fewer nodes,
+    # the random sampling below can fail (n-1 < 2).
+    if n < 4:
+        return best
     for _ in range(iterations):
         i, k = np.sort(np.random.choice(n - 1, 2, replace=False))
         if i == k:

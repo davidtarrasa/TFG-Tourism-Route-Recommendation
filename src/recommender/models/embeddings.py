@@ -64,6 +64,25 @@ def score_embeddings_next(model, current_poi: str, topn: int = 50) -> Dict[str, 
     return out
 
 
+def score_embeddings_context(model, context_items: List[str], topn: int = 50) -> Dict[str, float]:
+    """
+    Score "next POI" usando un contexto (promedio de embeddings de los Ãºltimos N POIs).
+
+    Gensim permite pasar una lista de tokens "positive" y promedia los vectores internamente.
+    """
+    if not context_items:
+        return {}
+    ctx = [str(x) for x in context_items if x and str(x) in model.wv]
+    if not ctx:
+        return {}
+    out: Dict[str, float] = {}
+    for pid, sim in model.wv.most_similar(positive=ctx, topn=topn):
+        if pid in ctx:
+            continue
+        out[pid] = float(sim)
+    return out
+
+
 def score_embeddings(model, user_items: List[str], topn: int = 20) -> Dict[str, float]:
     """Acumula similitudes de vecinos embedding para los POIs vistos."""
     from collections import Counter
@@ -80,4 +99,4 @@ def score_embeddings(model, user_items: List[str], topn: int = 20) -> Dict[str, 
     return dict(scores)
 
 
-__all__ = ["train_embeddings", "similar_pois", "score_embeddings_next", "score_embeddings"]
+__all__ = ["train_embeddings", "similar_pois", "score_embeddings_next", "score_embeddings_context", "score_embeddings"]

@@ -9,7 +9,7 @@
 # Note: "more potent" != "bigger". These defaults aim for stronger generalization
 # (skip-gram + more epochs + stronger negative sampling).
 vector_size = 300
-window = 15
+window = 12
 min_count = 1
 workers = 4
 epochs = 40
@@ -21,6 +21,12 @@ seed = 42
 
 # How many neighbors per seed POI are used to build recommendation scores.
 topn_score = 2000
+
+# Use the last N items as context instead of only current POI (better sequential signal).
+context_n = 3
+
+# Penalize very popular POIs when scoring embedding neighbors.
+hub_alpha = 0.0
 
 [als]
 factors = 256
@@ -36,12 +42,32 @@ current_only = [0.10, 0.15, 0.35, 0.05, 0.35]
 embed_or_als  = [0.15, 0.15, 0.10, 0.15, 0.45]
 cold_start   = [0.60, 0.20, 0.20, 0.00, 0.00]
 
+# When we have a current POI and we are building a route step-by-step (trail-like),
+# prefer sequential signals over long-term preference models.
+trail_current = [0.00, 0.20, 0.65, 0.15, 0.00]
+
 [filters]
 exclude_categories = ["Intersection", "State", "Home (private)"]
 
 [prefs]
 # Score boost applied when a candidate matches one of the preferred categories.
 category_boost = 0.20
+
+[route]
+# Constraints/targets for the *ordered itinerary* (used by route evaluation).
+# These are heuristic values; tune per city scale and desired itinerary length.
+min_leg_km = 0.35    # too close below this (e.g., same block)
+max_leg_km = 5.0     # too far above this (big jump)
+max_total_km = 30.0  # soft reference (not a hard constraint)
+min_unique_cat_ratio = 0.5  # encourage diversity: >= 50% unique categories in K
+
+[route_planner]
+# Greedy route construction constraints:
+candidate_pool = 1000       # how many top-scoring POIs are considered when planning a route
+max_per_category = 2
+pair_min_km = 0.22
+distance_weight = 0.35     # penalize long legs (0..1)
+diversity_bonus = 0.06     # small bonus for unseen categories
 
 [eval]
 # Settings used ONLY when running `python -m src.recommender.eval.evaluate --fair`
@@ -55,3 +81,11 @@ emb_vector_size = 128
 emb_window = 10
 emb_epochs = 10
 emb_negative = 10
+
+[eval_routes]
+# How many top categories from user history are considered as "user preference profile"
+user_top_categories = 5
+
+[markov]
+# Penalize very popular POIs (hubs) in Markov recommendations.
+hub_alpha = 0.5

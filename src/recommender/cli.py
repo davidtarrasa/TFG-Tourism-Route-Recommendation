@@ -80,7 +80,9 @@ def main():
         print(df)
 
     if args.build_route and not df.empty:
+        from .config import DEFAULT_CONFIG_PATH, load_config
         from .route_builder import build_route, to_geojson, to_folium_map
+        from .route_planner import plan_route
         from .utils_db import get_conn, load_pois
         import os, json
 
@@ -97,15 +99,65 @@ def main():
         if args.lat is not None and args.lon is not None:
             anchor = (args.lat, args.lon)
 
-        route = build_route(df, anchor_lat=anchor[0] if anchor else None, anchor_lon=anchor[1] if anchor else None)
+        # Build a better itinerary by selecting from a larger pool using route constraints.
+        cfg = load_config(DEFAULT_CONFIG_PATH)
+        route_cfg = cfg.get("route", {})
+        route_pl_cfg = cfg.get("route_planner", {})
 
-        gj = to_geojson(route.ordered_df)
+        pool_k = max(int(args.k) * 50, 500)
+        try:
+            df_pool = recommend(
+                dsn=args.dsn,
+                city=args.city,
+                city_qid=args.city_qid,
+                user_id=args.user_id,
+                current_poi=args.current_poi,
+                k=pool_k,
+                visits_limit=args.visits_limit,
+                mode=args.mode,
+                use_embeddings=args.use_embeddings,
+                embeddings_path=args.embeddings_path,
+                use_als=args.use_als,
+                als_path=args.als_path,
+                lat=args.lat,
+                lon=args.lon,
+                max_price_tier=args.max_price_tier,
+                free_only=args.free_only,
+                prefs=prefs,
+                distance_weight=args.distance_weight,
+                diversify=False,
+            )
+        except Exception:
+            df_pool = df
+
+        planned = plan_route(
+            df_pool,
+            k=int(args.k),
+            anchor=anchor,
+            min_leg_km=float(route_cfg.get("min_leg_km", 0.3)),
+            max_leg_km=float(route_cfg.get("max_leg_km", 5.0)),
+            pair_min_km=float(route_pl_cfg.get("pair_min_km", 0.2)),
+            max_per_category=int(route_pl_cfg.get("max_per_category", 2)),
+            distance_weight=float(route_pl_cfg.get("distance_weight", 0.35)),
+            diversity_bonus=float(route_pl_cfg.get("diversity_bonus", 0.05)),
+        )
+
+        if not planned.ordered_df.empty:
+            ordered_df = planned.ordered_df
+            total_km = planned.total_km
+        else:
+            # Fallback: just order the current top-K.
+            rr = build_route(df, anchor_lat=anchor[0] if anchor else None, anchor_lon=anchor[1] if anchor else None)
+            ordered_df = rr.ordered_df
+            total_km = rr.total_km
+
+        gj = to_geojson(ordered_df)
         with open(args.geojson_output, "w", encoding="utf-8") as f:
             json.dump(gj, f, ensure_ascii=False, indent=2)
 
-        m = to_folium_map(route.ordered_df, anchor=anchor)
+        m = to_folium_map(ordered_df, anchor=anchor)
         m.save(args.route_output)
-        print(f"Ruta ordenada guardada en {args.route_output} (GeoJSON en {args.geojson_output}), total {route.total_km:.2f} km")
+        print(f"Ruta ordenada guardada en {args.route_output} (GeoJSON en {args.geojson_output}), total {total_km:.2f} km")
 
 
 if __name__ == "__main__":

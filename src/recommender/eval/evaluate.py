@@ -26,10 +26,40 @@ from ..features.word2vec import sequences_from_visits
 from ..models.content_based import score_content
 from ..models.co_visitation import score_co_visitation
 from ..models.markov import next_poi_order2
-from ..models.embeddings import score_embeddings_next, train_embeddings
+from ..models.embeddings import score_embeddings_context, score_embeddings_next, train_embeddings
 from ..models.als import build_interactions, train_als
 from ..utils_db import get_conn, load_pois, load_poi_categories, load_visits
 from ..config import DEFAULT_CONFIG_PATH, load_config
+
+
+def _apply_hub_penalty(scores: Dict[str, float], item_counts: Dict[str, int], alpha: float) -> Dict[str, float]:
+    """
+    Penalize extremely popular items (hubs) to reduce generic recommendations.
+
+    score' = score / (count ** alpha)
+    - alpha=0 -> no change
+    """
+    if not scores:
+        return {}
+    if alpha <= 0:
+        return scores
+    out: Dict[str, float] = {}
+    for k, v in scores.items():
+        c = float(item_counts.get(str(k), 1))
+        out[str(k)] = float(v) / (c**alpha if c > 0 else 1.0)
+    return out
+
+
+def _embedding_context(user_items: List[str], current_poi: Optional[str], context_n: int) -> List[str]:
+    ctx = [str(x) for x in user_items if x]
+    if current_poi:
+        ctx = [x for x in ctx if x != str(current_poi)]
+        ctx.append(str(current_poi))
+    if not ctx:
+        return []
+    if context_n <= 0:
+        return ctx[-1:]
+    return ctx[-context_n:]
 
 
 def split_train_test(visits: pd.DataFrame, test_size: int = 1, min_train: int = 1) -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -112,6 +142,10 @@ def eval_modes(
     emb_cfg = cfg.get("embeddings", {})
     als_cfg = cfg.get("als", {})
     eval_cfg = cfg.get("eval", {})
+    markov_cfg = cfg.get("markov", {})
+
+    # Popularity counts for hub penalty (avoid ultra-popular POIs dominating results).
+    item_counts: Dict[str, int] = train_visits["venue_id"].astype(str).value_counts().to_dict()
     # Features globales sobre train
     tfidf_matrix, tfidf_ids, _ = build_tfidf(poi_cats)
     co_mat, id_to_idx, idx_to_id = build_cooccurrence(train_visits)
@@ -150,7 +184,8 @@ def eval_modes(
                 hs=int(emb_cfg.get("hs", 0)),
                 seed=int(emb_cfg.get("seed", 42)),
             )
-            if embeddings_path:
+            # Do not overwrite the "real" cached model during fair evaluation runs.
+            if (not fair) and embeddings_path:
                 try:
                     import joblib
                     joblib.dump(embed_model, embeddings_path)
@@ -189,7 +224,9 @@ def eval_modes(
             if als_path:
                 try:
                     import joblib
-                    joblib.dump(als_obj, als_path)
+                    # Do not overwrite the "real" cached model during fair evaluation runs.
+                    if not fair:
+                        joblib.dump(als_obj, als_path)
                 except Exception:
                     pass
 
@@ -237,6 +274,7 @@ def eval_modes(
                 continue
 
             user_items = user_train["venue_id"].astype(str).tolist()
+            seq_items = user_items
             seen = set(user_items)
             truth_items = [t for t in user_test["venue_id"].astype(str).tolist() if t not in seen]
             if not truth_items:
@@ -248,10 +286,22 @@ def eval_modes(
 
         content_scores = score_content(user_items, tfidf_ids, tfidf_matrix)
         co_scores = score_co_visitation(user_items, co_mat, id_to_idx, idx_to_id)
-        markov_scores = dict(next_poi_order2(prev_poi, str(current_poi), trans_poi2, trans_poi, topn=500, backoff=0.3))
-        embed_scores = {}
+        markov_scores = dict(next_poi_order2(prev_poi, str(current_poi), trans_poi2, trans_poi, topn=2000, backoff=0.3))
+        markov_scores = _apply_hub_penalty(markov_scores, item_counts=item_counts, alpha=float(markov_cfg.get("hub_alpha", 0.0)))
+
+        embed_scores: Dict[str, float] = {}
         if embed_model:
-            embed_scores = score_embeddings_next(embed_model, str(current_poi), topn=int(emb_cfg.get("topn_score", 1000)))
+            topn = int(emb_cfg.get("topn_score", 1000))
+            ctx_n = int(emb_cfg.get("context_n", 1))
+            ctx = _embedding_context(user_items=seq_items, current_poi=str(current_poi), context_n=ctx_n)
+            if len(ctx) >= 2:
+                embed_scores = score_embeddings_context(embed_model, ctx, topn=topn)
+            else:
+                embed_scores = score_embeddings_next(embed_model, str(current_poi), topn=topn)
+            embed_scores = _apply_hub_penalty(embed_scores, item_counts=item_counts, alpha=float(emb_cfg.get("hub_alpha", 0.0)))
+            # Remove already-seen items early; embeddings often rank near-duplicates from the same trail very high.
+            if seen:
+                embed_scores = {k: v for k, v in embed_scores.items() if k not in seen}
 
         als_scores = {}
         if als_obj:
@@ -318,7 +368,9 @@ def eval_modes(
             elif mode == "als":
                 rec_scores = als_scores
             else:  # hybrid
-                if user_items and current_poi:
+                if protocol == "trail" and current_poi:
+                    w = list(hyb_cfg.get("trail_current", [0.05, 0.10, 0.55, 0.30, 0.00]))
+                elif user_items and current_poi:
                     w = list(hyb_cfg.get("user_current", [0.1, 0.15, 0.15, 0.05, 0.55]))
                 elif user_items:
                     w = list(hyb_cfg.get("user_only", [0.1, 0.2, 0.1, 0.05, 0.55]))
@@ -387,7 +439,7 @@ def main():
 
     conn = get_conn()
     visits = load_visits(conn, city_qid=args.city_qid, limit=args.visits_limit)
-    pois = load_pois(conn, city=args.city)
+    pois = load_pois(conn, city=args.city, city_qid=args.city_qid)
     poi_cats = load_poi_categories(conn, fsq_ids=pois["fsq_id"])
 
     if args.protocol == 'trail':
