@@ -96,8 +96,9 @@ def plan_route(
             # Hard-ish constraints
             if dists[i] < pair_min_km:
                 continue
-            if len(selected_rows) > 0:
-                # Only enforce leg constraints after we have at least 1 POI.
+            # Enforce leg constraints after the first POI, and also for the first POI
+            # when we have an explicit anchor (otherwise the route can "start" far away).
+            if len(selected_rows) > 0 or anchor is not None:
                 if dists[i] < min_leg_km or dists[i] > max_leg_km:
                     continue
 
@@ -149,4 +150,3 @@ def plan_route(
 
 
 __all__ = ["PlannedRoute", "plan_route"]
-

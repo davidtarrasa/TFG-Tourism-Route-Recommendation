@@ -92,7 +92,7 @@ def main():
         # Completar lat/lon si faltan
         if "lat" not in df.columns or "lon" not in df.columns:
             conn = get_conn(args.dsn)
-            pois_full = load_pois(conn, city=args.city)
+            pois_full = load_pois(conn, city=args.city, city_qid=args.city_qid)
             df = df.merge(pois_full[["fsq_id", "lat", "lon"]], on="fsq_id", how="left")
 
         anchor = None
@@ -129,6 +129,11 @@ def main():
             )
         except Exception:
             df_pool = df
+        # Ensure the pool has coordinates (required by the route planner).
+        if ("lat" not in df_pool.columns or "lon" not in df_pool.columns) and "fsq_id" in df_pool.columns:
+            conn = get_conn(args.dsn)
+            pois_full = load_pois(conn, city=args.city, city_qid=args.city_qid)
+            df_pool = df_pool.merge(pois_full[["fsq_id", "lat", "lon"]], on="fsq_id", how="left")
 
         planned = plan_route(
             df_pool,
@@ -143,8 +148,14 @@ def main():
         )
 
         if not planned.ordered_df.empty:
-            ordered_df = planned.ordered_df
-            total_km = planned.total_km
+            # Re-order the selected POIs with NN + 2-opt to reduce crossings and make the path clearer.
+            rr = build_route(
+                planned.ordered_df,
+                anchor_lat=anchor[0] if anchor else None,
+                anchor_lon=anchor[1] if anchor else None,
+            )
+            ordered_df = rr.ordered_df
+            total_km = rr.total_km
         else:
             # Fallback: just order the current top-K.
             rr = build_route(df, anchor_lat=anchor[0] if anchor else None, anchor_lon=anchor[1] if anchor else None)
