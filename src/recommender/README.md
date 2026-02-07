@@ -75,3 +75,64 @@ Notas técnicas y “state of the art” en versión ligera
 - CF/Co-visitas: co-ocurrencia y/o ALS implícito para check-ins binarios (baseline robusto).
 - Multi-aspecto: usa rating/price_tier/is_free en re-ranking, siguiendo enfoques multi-factor de la literatura (Hosseini 2017).
 - Geográfico: re-ranking por distancia al punto actual y clustering espacial si se requiere diversidad geográfica.
+
+
+Plan de "multi-ruta" por request (pendiente de implementar)
+-----------------------------------------------------------
+Idea: ante una request de recomendacion, devolver **varias rutas alternativas** (cada una con un "motivo" distinto) y, opcionalmente, una ruta "full" que combine todas las señales disponibles.
+
+Nota importante: **no** guardamos "historial de rutas generadas". El "historial" se refiere solo a lo que ya existe en la BD (`visits`) para ese `user_id` (check-ins / secuencias historicas).
+
+Señales posibles en una request
+-------------------------------
+- Historial: existe si `user_id` aparece en `visits` (hay al menos 1 visita).
+- Inputs del usuario (opcionales): `prefs` / instrucciones / restricciones (p.ej. `free`, `max_price`, categorias objetivo).
+- Ubicacion (opcional): `lat/lon` o `current_poi`.
+
+Regla de oro: si una señal no viene, **no debe afectar** a las recomendaciones que no la usan (no "ensuciar" otras rutas).
+
+Rutas a devolver (por defecto)
+------------------------------
+1) Ruta por historial ("history")
+   - Usa solo historial (ALS / item-item / markov / content-perfil).
+   - No usa ubicacion ni prefs.
+   - Si el usuario no existe (sin visitas), se omite o se degrada a "popularidad" (si existe) / content generico.
+
+2) Ruta por inputs ("inputs")
+   - Usa prefs/instrucciones como señal dominante.
+   - Implementacion: content-based + filtros/boosts por categorias/price/is_free + diversidad.
+   - No usa historial si el usuario es nuevo. Si el usuario existe, idealmente tampoco usa historial (para aislar el efecto del input).
+   - Si no hay prefs/instrucciones, se omite.
+
+3) Ruta por ubicacion ("location")
+   - Usa ubicacion como señal dominante.
+   - Implementacion: ranking por distancia (y/o penalizacion fuerte) + filtros basicos (p.ej. ciudad) + diversidad.
+   - Independiente del historial.
+   - Si no hay `lat/lon` ni `current_poi`, se omite.
+
+4) Ruta con todo ("full")
+   - Combina historial + inputs + ubicacion.
+   - Solo se genera si **estan presentes las 3** señales (historial disponible + prefs/instrucciones + ubicacion).
+   - Implementacion: hibrido con pesos + reranking por distancia + filtros/boosts por prefs.
+   - Si falta alguna de las 3 señales, NO se crea esta ruta (para que el nombre "full" sea consistente).
+
+Comportamiento para usuario nuevo vs existente
+----------------------------------------------
+- Usuario existente:
+  - Puede recibir 1..4 rutas segun señales presentes.
+  - "history" siempre posible (si hay historial suficiente), "inputs" y "location" solo si vienen, "full" solo si vienen todas.
+
+- Usuario nuevo (no existe en `visits`):
+  - No se permite usar historial (no existe).
+  - Debe venir al menos un input (prefs y/o ubicacion). Si no viene ninguno: devolver error claro ("missing_input") o pedir datos.
+  - Puede recibir "inputs" y/o "location". "history" se omite. "full" no aplica (falta historial).
+
+Formato de respuesta (idea)
+---------------------------
+Devolver algo tipo JSON (CLI puede imprimirlo o guardar a fichero) con:
+- `routes[]` donde cada ruta tenga:
+  - `type`: history|inputs|location|full
+  - `signals_used`: {history:bool, inputs:bool, location:bool}
+  - `pois`: lista ordenada de POIs con score y metadatos
+  - `explanations` (breve): por que se elige cada POI (top factores)
+  - `map_outputs` (opcional): html + geojson
