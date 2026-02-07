@@ -160,7 +160,28 @@ def to_geojson(df: pd.DataFrame) -> dict:
 def to_folium_map(df: pd.DataFrame, anchor: Optional[Tuple[float, float]] = None) -> folium.Map:
     center_lat = float(df["lat"].mean())
     center_lon = float(df["lon"].mean())
-    m = folium.Map(location=[center_lat, center_lon], zoom_start=13, tiles="CartoDB positron")
+    # Default to a satellite basemap (more "realistic"). We keep a light basemap as an
+    # alternative via LayerControl.
+    m = folium.Map(location=[center_lat, center_lon], zoom_start=13, tiles=None)
+
+    # Satellite (Esri World Imagery)
+    folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        attr="Esri",
+        name="Satellite",
+        overlay=False,
+        control=True,
+        show=True,
+    ).add_to(m)
+
+    # Light basemap (useful for reading street names)
+    folium.TileLayer(
+        tiles="CartoDB positron",
+        name="Light",
+        overlay=False,
+        control=True,
+        show=False,
+    ).add_to(m)
 
     # Ruta (include anchor -> first POI for visual clarity)
     coords = df[["lat", "lon"]].astype(float).to_numpy()
@@ -181,4 +202,5 @@ def to_folium_map(df: pd.DataFrame, anchor: Optional[Tuple[float, float]] = None
     if anchor is not None:
         folium.Marker(anchor, icon=folium.Icon(color="green", icon="play"), tooltip="Start").add_to(m)
 
+    folium.LayerControl(collapsed=True).add_to(m)
     return m
