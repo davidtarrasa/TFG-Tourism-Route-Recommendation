@@ -393,6 +393,12 @@ def main() -> None:
                 pair_min_km=float(route_pl_cfg.get("pair_min_km", 0.2)),
                 max_per_category=int(route_pl_cfg.get("max_per_category", 2)),
                 distance_weight=float(route_pl_cfg.get("distance_weight", 0.35)),
+                distance_weight_no_anchor=(
+                    float(route_pl_cfg["distance_weight_no_anchor"]) if route_pl_cfg.get("distance_weight_no_anchor") is not None else None
+                ),
+                max_leg_km_no_anchor=(
+                    float(route_pl_cfg["max_leg_km_no_anchor"]) if route_pl_cfg.get("max_leg_km_no_anchor") is not None else None
+                ),
                 diversity_bonus=float(route_pl_cfg.get("diversity_bonus", 0.05)),
             )
             if planned.ordered_df.empty:

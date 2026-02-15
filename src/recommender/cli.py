@@ -135,6 +135,8 @@ def main():
             pois_full = load_pois(conn, city=args.city, city_qid=args.city_qid)
             df_pool = df_pool.merge(pois_full[["fsq_id", "lat", "lon"]], on="fsq_id", how="left")
 
+        dw_no_anchor = route_pl_cfg.get("distance_weight_no_anchor")
+        max_leg_no_anchor = route_pl_cfg.get("max_leg_km_no_anchor")
         planned = plan_route(
             df_pool,
             k=int(args.k),
@@ -144,6 +146,8 @@ def main():
             pair_min_km=float(route_pl_cfg.get("pair_min_km", 0.2)),
             max_per_category=int(route_pl_cfg.get("max_per_category", 2)),
             distance_weight=float(route_pl_cfg.get("distance_weight", 0.35)),
+            distance_weight_no_anchor=float(dw_no_anchor) if dw_no_anchor is not None else None,
+            max_leg_km_no_anchor=float(max_leg_no_anchor) if max_leg_no_anchor is not None else None,
             diversity_bonus=float(route_pl_cfg.get("diversity_bonus", 0.05)),
         )
 
@@ -166,7 +170,8 @@ def main():
         with open(args.geojson_output, "w", encoding="utf-8") as f:
             json.dump(gj, f, ensure_ascii=False, indent=2)
 
-        m = to_folium_map(ordered_df, anchor=anchor)
+        # For now we expose only driving route in CLI to keep UX simple.
+        m = to_folium_map(ordered_df, anchor=anchor, route_modes=("drive",))
         m.save(args.route_output)
         print(f"Ruta ordenada guardada en {args.route_output} (GeoJSON en {args.geojson_output}), total {total_km:.2f} km")
 

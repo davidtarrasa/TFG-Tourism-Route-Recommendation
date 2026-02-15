@@ -12,8 +12,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple
+import colorsys
+import json
+import os
+import html
+from urllib import parse, request
 
 import folium
+from folium.plugins import PolyLineTextPath
 import numpy as np
 import pandas as pd
 
@@ -157,7 +163,205 @@ def to_geojson(df: pd.DataFrame) -> dict:
     return {"type": "FeatureCollection", "features": features}
 
 
-def to_folium_map(df: pd.DataFrame, anchor: Optional[Tuple[float, float]] = None) -> folium.Map:
+def _normalize_mode(mode: str) -> str:
+    mode = str(mode).strip().lower()
+    if mode in ("walk", "walking", "foot"):
+        return "walk"
+    if mode in ("drive", "driving", "car"):
+        return "drive"
+    return mode
+
+
+def _geoapify_mode(mode: str) -> str:
+    mode = _normalize_mode(mode)
+    if mode == "walk":
+        return "walk"
+    if mode == "drive":
+        return "drive"
+    return "drive"
+
+
+def _route_color(mode: str) -> str:
+    mode = _normalize_mode(mode)
+    if mode == "walk":
+        return "#1f77b4"
+    if mode == "drive":
+        return "#ff3d00"
+    return "#0088ff"
+
+
+def _route_label(mode: str) -> str:
+    mode = _normalize_mode(mode)
+    if mode == "walk":
+        return "Walking route"
+    if mode == "drive":
+        return "Driving route"
+    return f"Route ({mode})"
+
+
+def _hsv_to_hex(h: float, s: float, v: float) -> str:
+    r, g, b = colorsys.hsv_to_rgb(h, s, v)
+    return f"#{int(r * 255):02x}{int(g * 255):02x}{int(b * 255):02x}"
+
+
+def _leg_palette(mode: str, n_legs: int) -> List[str]:
+    mode = _normalize_mode(mode)
+    n = max(int(n_legs), 1)
+    if mode == "drive":
+        # Blue cascading palette with enough contrast and no repeats.
+        h0, h1 = 225.0 / 360.0, 190.0 / 360.0
+        return [_hsv_to_hex(h0 + (h1 - h0) * (i / max(n - 1, 1)), 0.85, 0.96 - 0.14 * (i / max(n - 1, 1))) for i in range(n)]
+    if mode == "walk":
+        # Cool cascading palette (blue -> cyan -> green) with no repeats.
+        h0, h1 = 215.0 / 360.0, 145.0 / 360.0
+        return [_hsv_to_hex(h0 + (h1 - h0) * (i / max(n - 1, 1)), 0.78, 0.93 - 0.10 * (i / max(n - 1, 1))) for i in range(n)]
+    return [_hsv_to_hex(205.0 / 360.0, 0.72, 0.92) for _ in range(n)]
+
+
+def _coords_for_route(df: pd.DataFrame, anchor: Optional[Tuple[float, float]] = None) -> List[Tuple[float, float]]:
+    coords = [(float(r["lat"]), float(r["lon"])) for _, r in df.iterrows()]
+    if anchor is not None:
+        coords = [(float(anchor[0]), float(anchor[1]))] + coords
+    return coords
+
+
+def _node_labels(df: pd.DataFrame, anchor: Optional[Tuple[float, float]]) -> List[str]:
+    labels = [f"{i+1}. {str(row.get('name', 'POI'))}" for i, (_, row) in enumerate(df.iterrows())]
+    if anchor is not None:
+        return ["Start"] + labels
+    return labels
+
+
+def _geoapify_leg(
+    start: Tuple[float, float],
+    end: Tuple[float, float],
+    mode: str,
+    api_key: str,
+    timeout_s: float = 8.0,
+) -> Optional[List[Tuple[float, float]]]:
+    m = _geoapify_mode(mode)
+    # Geoapify routing expects "lon,lat|lon,lat"
+    waypoints = f"{start[1]},{start[0]}|{end[1]},{end[0]}"
+    params = parse.urlencode({"waypoints": waypoints, "mode": m, "apiKey": api_key})
+    url = f"https://api.geoapify.com/v1/routing?{params}"
+    try:
+        with request.urlopen(url, timeout=timeout_s) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        features = payload.get("features") or []
+        if not features:
+            return None
+        geometry = features[0].get("geometry") or {}
+        coords = geometry.get("coordinates") or []
+        if not coords:
+            return None
+        # GeoJSON comes as [lon, lat] -> folium expects [lat, lon]
+        out = [(float(c[1]), float(c[0])) for c in coords if isinstance(c, (list, tuple)) and len(c) >= 2]
+        return out if out else None
+    except Exception:
+        return None
+
+
+def _compose_real_path(
+    points: List[Tuple[float, float]],
+    mode: str,
+    api_key: Optional[str],
+) -> List[Tuple[float, float]]:
+    if len(points) < 2:
+        return points
+    if not api_key:
+        return points
+    full: List[Tuple[float, float]] = []
+    for i in range(len(points) - 1):
+        leg = _geoapify_leg(points[i], points[i + 1], mode=mode, api_key=api_key)
+        if not leg:
+            leg = [points[i], points[i + 1]]
+        if not full:
+            full.extend(leg)
+        else:
+            # Avoid duplicate junction point between legs.
+            full.extend(leg[1:])
+    return full
+
+
+def _osrm_profile(mode: str) -> str:
+    mode = _normalize_mode(mode)
+    if mode == "walk":
+        return "foot"
+    return "driving"
+
+
+def _osrm_leg(
+    start: Tuple[float, float],
+    end: Tuple[float, float],
+    mode: str,
+    timeout_s: float = 8.0,
+) -> Optional[List[Tuple[float, float]]]:
+    profile = _osrm_profile(mode)
+    # OSRM expects lon,lat
+    coord = f"{start[1]},{start[0]};{end[1]},{end[0]}"
+    params = parse.urlencode({"overview": "full", "geometries": "geojson"})
+    url = f"https://router.project-osrm.org/route/v1/{profile}/{coord}?{params}"
+    try:
+        with request.urlopen(url, timeout=timeout_s) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        routes = payload.get("routes") or []
+        if not routes:
+            return None
+        geometry = routes[0].get("geometry") or {}
+        coords = geometry.get("coordinates") or []
+        if not coords:
+            return None
+        out = [(float(c[1]), float(c[0])) for c in coords if isinstance(c, (list, tuple)) and len(c) >= 2]
+        return out if out else None
+    except Exception:
+        return None
+
+
+def _route_leg(
+    start: Tuple[float, float],
+    end: Tuple[float, float],
+    mode: str,
+    api_key: Optional[str],
+) -> List[Tuple[float, float]]:
+    leg = None
+    if api_key:
+        leg = _geoapify_leg(start, end, mode=mode, api_key=api_key)
+    if not leg:
+        leg = _osrm_leg(start, end, mode=mode)
+    if not leg:
+        leg = [start, end]
+    return leg
+
+
+def _load_api_key_from_env_file() -> Optional[str]:
+    try:
+        env_path = os.path.join(os.getcwd(), ".env")
+        if not os.path.exists(env_path):
+            return None
+        with open(env_path, "r", encoding="utf-8") as f:
+            for raw in f:
+                line = raw.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" not in line:
+                    continue
+                key, val = line.split("=", 1)
+                if key.strip() != "GEOAPIFY_API_KEY":
+                    continue
+                # Support inline comments in .env
+                value = val.split("#", 1)[0].strip().strip('"').strip("'")
+                return value or None
+    except Exception:
+        return None
+    return None
+
+
+def to_folium_map(
+    df: pd.DataFrame,
+    anchor: Optional[Tuple[float, float]] = None,
+    route_modes: Optional[Sequence[str]] = None,
+    api_key: Optional[str] = None,
+) -> folium.Map:
     center_lat = float(df["lat"].mean())
     center_lon = float(df["lon"].mean())
     # Default to a satellite basemap (more "realistic"). We keep a light basemap as an
@@ -183,12 +387,87 @@ def to_folium_map(df: pd.DataFrame, anchor: Optional[Tuple[float, float]] = None
         show=False,
     ).add_to(m)
 
-    # Ruta (include anchor -> first POI for visual clarity)
-    coords = df[["lat", "lon"]].astype(float).to_numpy()
-    line = coords.tolist()
-    if anchor is not None:
-        line = [[float(anchor[0]), float(anchor[1])]] + line
-    folium.PolyLine(line, color="blue", weight=4, opacity=0.7).add_to(m)
+    route_modes = route_modes or ("walk", "drive")
+    clean_modes = []
+    for mode in route_modes:
+        nm = _normalize_mode(mode)
+        if nm not in clean_modes:
+            clean_modes.append(nm)
+    points = _coords_for_route(df, anchor=anchor)
+    labels = _node_labels(df, anchor=anchor)
+    key = api_key if api_key is not None else os.getenv("GEOAPIFY_API_KEY") or _load_api_key_from_env_file()
+
+    # Always show straight edges as a reference layer.
+    straight_grp = folium.FeatureGroup(name="Straight edges", show=True)
+    # Warm dashed edges with very small variation (orange/red family).
+    straight_colors = ["#ff6d00", "#ff7043", "#ff5722", "#f4511e"]
+    for i in range(len(points) - 1):
+        leg = [points[i], points[i + 1]]
+        color = straight_colors[i % len(straight_colors)]
+        line = folium.PolyLine(
+            leg,
+            color=color,
+            weight=3,
+            opacity=0.95,
+            dash_array="10,6",
+            tooltip=f"Straight edge {i+1}: {i+1} -> {i+2}",
+        )
+        line.add_to(straight_grp)
+    straight_grp.add_to(m)
+
+    # Draw one layer per travel mode (walking / driving), using real roads when possible.
+    legend_sections: List[str] = []
+    leg_layers: List[Tuple[str, str]] = []
+    for idx, mode in enumerate(clean_modes):
+        grp = folium.FeatureGroup(name=_route_label(mode), show=(idx == 0))
+        palette = _leg_palette(mode, len(points) - 1)
+        leg_items: List[str] = []
+        for i in range(len(points) - 1):
+            leg = _route_leg(points[i], points[i + 1], mode=mode, api_key=key)
+            color = palette[i % len(palette)]
+            from_label = html.escape(labels[i]) if i < len(labels) else f"P{i+1}"
+            to_label = html.escape(labels[i + 1]) if i + 1 < len(labels) else f"P{i+2}"
+            leg_title = f"{_route_label(mode)} leg {i+1}: {from_label} -> {to_label}"
+            leg_group = folium.FeatureGroup(name=f"{_route_label(mode)} segment {i+1}", show=True, control=False)
+            line = folium.PolyLine(
+                leg,
+                color=color,
+                weight=4 if mode == "drive" else 4.5,
+                opacity=0.98,
+                tooltip=leg_title,
+            )
+            line.add_to(leg_group)
+            try:
+                PolyLineTextPath(
+                    line,
+                    " > ",
+                    repeat=True,
+                    offset=7,
+                    attributes={"fill": color, "font-weight": "bold", "font-size": "14"},
+                ).add_to(leg_group)
+            except Exception:
+                pass
+            leg_group.add_to(grp)
+            layer_name = leg_group.get_name()
+            leg_layers.append((layer_name, f"{_route_label(mode)} - Tramo {i+1}"))
+            leg_items.append(
+                f"<div style='display:flex;align-items:flex-start;gap:8px;margin:4px 0;'>"
+                f"<span style='display:inline-block;flex:0 0 16px;width:16px;height:16px;border-radius:3px;background:{color};border:2px solid #111;margin-top:2px;'></span>"
+                f"<label style='display:flex;align-items:flex-start;gap:6px;cursor:pointer;line-height:1.25;'>"
+                f"<input type='checkbox' checked "
+                f"data-layer='{layer_name}' "
+                f"onchange='toggleRouteLeg(this.dataset.layer, this.checked)'/>"
+                f"<span style='display:inline-block;'>Tramo {i+1}: {from_label} -> {to_label}</span>"
+                f"</label>"
+                f"</div>"
+            )
+        grp.add_to(m)
+        legend_sections.append(
+            "<div style='margin-top:6px;'>"
+            f"<div style='font-weight:700;margin-bottom:4px;'>{html.escape(_route_label(mode))}</div>"
+            + "".join(leg_items)
+            + "</div>"
+        )
 
     # Marcadores
     for idx, row in df.iterrows():
@@ -201,6 +480,40 @@ def to_folium_map(df: pd.DataFrame, anchor: Optional[Tuple[float, float]] = None
     # Anchor
     if anchor is not None:
         folium.Marker(anchor, icon=folium.Icon(color="green", icon="play"), tooltip="Start").add_to(m)
+
+    # On-map legend with segment color order.
+    legend_html = (
+        "<div style=\"position: fixed; bottom: 20px; right: 20px; z-index: 9999; "
+        "background: rgba(255,255,255,0.95); border: 2px solid #333; border-radius: 8px; "
+        "padding: 10px 12px; min-width: 300px; max-width: 420px; max-height: 45vh; overflow:auto; "
+        "font-family: Arial, sans-serif; font-size: 12px; line-height: 1.35; color:#111;\">"
+        "<div style='font-size:13px;font-weight:800;margin-bottom:6px;'>Orden de tramos (color)</div>"
+        + "".join(legend_sections)
+        + "</div>"
+    )
+    m.get_root().html.add_child(folium.Element(legend_html))
+    map_js_name = m.get_name()
+    leg_registry = ", ".join([f"'{lname}': '{html.escape(title)}'" for lname, title in leg_layers])
+    legend_js = f"""
+    <script>
+      window.__routeLegRegistry = {{{leg_registry}}};
+      window.toggleRouteLeg = function(layerName, checked) {{
+        try {{
+          var mapObj = {map_js_name};
+          var layer = window[layerName];
+          if (!mapObj || !layer) return;
+          if (checked) {{
+            if (!mapObj.hasLayer(layer)) mapObj.addLayer(layer);
+          }} else {{
+            if (mapObj.hasLayer(layer)) mapObj.removeLayer(layer);
+          }}
+        }} catch (e) {{
+          console.warn('toggleRouteLeg failed:', e);
+        }}
+      }};
+    </script>
+    """
+    m.get_root().html.add_child(folium.Element(legend_js))
 
     folium.LayerControl(collapsed=True).add_to(m)
     return m

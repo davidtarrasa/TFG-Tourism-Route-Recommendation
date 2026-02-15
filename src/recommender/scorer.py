@@ -403,15 +403,9 @@ def recommend(
                 candidates["pref_match"] == True, "score"
             ] * (1.0 + boost)
 
-    # Re-ranking por distancia si hay ancla
-    anchor_lat, anchor_lon = lat, lon
-    if (anchor_lat is None or anchor_lon is None) and current_poi:
-        row = pois_df[pois_df["fsq_id"] == current_poi]
-        if not row.empty:
-            anchor_lat = float(row.iloc[0]["lat"])
-            anchor_lon = float(row.iloc[0]["lon"])
-
-    if anchor_lat is not None and anchor_lon is not None and not candidates.empty:
+    # Re-ranking por distancia SOLO si hay ubicacion explicita (lat/lon).
+    # Si no se proporciona, dejamos que el ranking lo dominen las senales del modelo.
+    if lat is not None and lon is not None and not candidates.empty:
         def haversine(lat1, lon1, lat2, lon2):
             R = 6371.0
             lat1, lon1, lat2, lon2 = map(np.radians, [lat1, lon1, lat2, lon2])
@@ -421,7 +415,7 @@ def recommend(
             c = 2 * np.arcsin(np.sqrt(a))
             return R * c
 
-        candidates["distance_km"] = haversine(anchor_lat, anchor_lon, candidates["lat"].astype(float), candidates["lon"].astype(float))
+        candidates["distance_km"] = haversine(lat, lon, candidates["lat"].astype(float), candidates["lon"].astype(float))
         if candidates["distance_km"].max() > 0:
             candidates["dist_norm"] = candidates["distance_km"] / (candidates["distance_km"].max() + 1e-8)
             candidates["score"] = candidates["score"] * (1 - distance_weight * candidates["dist_norm"])

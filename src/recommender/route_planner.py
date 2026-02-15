@@ -41,6 +41,8 @@ def plan_route(
     pair_min_km: float = 0.2,
     max_per_category: int = 2,
     distance_weight: float = 0.35,
+    distance_weight_no_anchor: Optional[float] = None,
+    max_leg_km_no_anchor: Optional[float] = None,
     diversity_bonus: float = 0.05,
 ) -> PlannedRoute:
     """
@@ -57,6 +59,15 @@ def plan_route(
         return PlannedRoute(df, 0.0, [])
 
     # Start point for legs: anchor if provided, otherwise first selected POI.
+    # If there is no explicit anchor, distance should not dominate ranking.
+    dw = float(distance_weight)
+    leg_max = float(max_leg_km)
+    if anchor is None:
+        if distance_weight_no_anchor is not None:
+            dw = float(distance_weight_no_anchor)
+        if max_leg_km_no_anchor is not None:
+            leg_max = float(max_leg_km_no_anchor)
+
     selected_rows = []
     legs: List[float] = []
     cat_counts: Dict[str, int] = {}
@@ -99,7 +110,7 @@ def plan_route(
             # Enforce leg constraints after the first POI, and also for the first POI
             # when we have an explicit anchor (otherwise the route can "start" far away).
             if len(selected_rows) > 0 or anchor is not None:
-                if dists[i] < min_leg_km or dists[i] > max_leg_km:
+                if dists[i] < min_leg_km or dists[i] > leg_max:
                     continue
 
             cat = cat_list[i]
@@ -107,7 +118,7 @@ def plan_route(
                 continue
 
             # Utility: base score penalized by distance, plus diversity bonus
-            u = float(base_scores[i]) - distance_weight * float(dists[i])
+            u = float(base_scores[i]) - dw * float(dists[i])
             if cat and cat_counts.get(cat, 0) == 0:
                 u += diversity_bonus
 
@@ -125,7 +136,7 @@ def plan_route(
                 cat = cat_list[i]
                 if cat and cat_counts.get(cat, 0) >= max_per_category:
                     continue
-                u = float(base_scores[i]) - distance_weight * float(dists[i])
+                u = float(base_scores[i]) - dw * float(dists[i])
                 if cat and cat_counts.get(cat, 0) == 0:
                     u += diversity_bonus
                 if u > best_u:

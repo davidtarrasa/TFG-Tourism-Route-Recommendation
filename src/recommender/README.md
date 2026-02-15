@@ -1,3 +1,7 @@
+Nota de producto
+----------------
+- La CLI se usa para desarrollo, validacion y experimentacion interna.
+- En la version de consumo (web/app), el usuario final no introducira comandos: toda la interaccion sera mediante interfaz.
 Metodología del recomendador (versión CLI)
 ==========================================
 
@@ -136,3 +140,4 @@ Devolver algo tipo JSON (CLI puede imprimirlo o guardar a fichero) con:
   - `pois`: lista ordenada de POIs con score y metadatos
   - `explanations` (breve): por que se elige cada POI (top factores)
   - `map_outputs` (opcional): html + geojson
+

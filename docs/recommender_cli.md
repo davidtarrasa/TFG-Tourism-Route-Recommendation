@@ -20,9 +20,11 @@ python -m src.recommender.train_als --city-qid Q35765 --visits-limit 200000 --ou
 
 Ejemplo de inferencia + mapa
 ```bash
-python -m src.recommender.cli --city-qid Q35765 --user-id 2725 --mode hybrid --k 10 --use-als --als-path src/recommender/cache/als_osaka.joblib --use-embeddings --embeddings-path src/recommender/cache/word2vec_osaka.joblib --lat 34.69 --lon 135.5 --distance-weight 0.3 --build-route --route-output data/reports/routes/route_osaka.html --geojson-output data/reports/routes/route_osaka.geojson
+python -m src.recommender.cli --city-qid Q35765 --user-id 2725 --mode hybrid --k 10 --use-als --als-path src/recommender/cache/als_osaka.joblib --use-embeddings --embeddings-path src/recommender/cache/word2vec_osaka.joblib --lat 34.69 --lon 135.5 --distance-weight 0.3 --build-route  --route-output data/reports/routes/route_osaka.html --geojson-output data/reports/routes/route_osaka.geojson
 ```
 Nota (PowerShell/Windows): no uses `\\` para continuar lÃ­neas; usa una sola lÃ­nea (como arriba) o el backtick `` ` ``.
+- En CLI, por ahora la ruta se dibuja solo en modo `drive`.
+- Si existe `GEOAPIFY_API_KEY`, el mapa dibuja el camino real por calles. Si no, usa lineas rectas como fallback.
 
 Evaluación offline
 ```bash
@@ -66,3 +68,4 @@ Normalización de `pois.city`
 python -m src.recommender.tools.normalize_cities --map osaka
 ```
 - Usa DSN por defecto (`POSTGRES_DSN` o `postgresql://tfg:tfgpass@localhost:55432/tfg_routes`).
+
