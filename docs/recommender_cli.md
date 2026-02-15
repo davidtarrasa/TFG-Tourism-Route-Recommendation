@@ -26,15 +26,39 @@ Nota (PowerShell/Windows): no uses `\\` para continuar lÃ­neas; usa una sola l
 
 Evaluación offline
 ```bash
-python -m src.recommender.eval.evaluate --city-qid Q35765 --k 20 --test-size 1 --min-train 1 --max-users 50 --use-als --als-path src/recommender/cache/als_osaka.joblib --use-embeddings --embeddings-path src/recommender/cache/word2vec_osaka.joblib
+python -m src.recommender.eval.evaluate --city-qid Q35765 --k 20 --test-size 1 --min-train 1 --max-users 50 --seed 42 --use-als --als-path src/recommender/cache/als_osaka.joblib --use-embeddings --embeddings-path src/recommender/cache/word2vec_osaka.joblib
 ```
 - Métricas: HitRate, Recall, MRR, NDCG (hold-out por usuario); imprime usuarios evaluados.
 
 Evaluación de rutas (calidad del itinerario)
 ```bash
-python -m src.recommender.eval.evaluate_routes --city-qid Q35765 --protocol trail --k 10 --max-cases 200 --modes content item markov embed als hybrid --use-als --als-path src/recommender/cache/als_osaka.joblib --use-embeddings --embeddings-path src/recommender/cache/word2vec_osaka.joblib --output data/reports/eval_routes_osaka.json
+python -m src.recommender.eval.evaluate_routes --city-qid Q35765 --protocol trail --k 10 --max-cases 200 --seed 42 --modes content item markov embed als hybrid --use-als --als-path src/recommender/cache/als_osaka.joblib --use-embeddings --embeddings-path src/recommender/cache/word2vec_osaka.joblib --output data/reports/eval_routes_osaka.json
 ```
 - Métricas: distancia total, distancias entre paradas (demasiado cerca/lejos), diversidad de categorías y match con perfil de categorías del usuario.
+
+Tuning (rápido, una ciudad)
+```bash
+# 1) Hibrido (pesos) - no reentrena modelos "grandes"
+python -m src.recommender.tune_hybrid --city-qid Q35765 --use-embeddings --embeddings-path src/recommender/cache/word2vec_osaka.joblib --use-als --out data/reports/tune_hybrid_osaka.json
+
+# 2) Markov (backoff + hub penalty) - sin reentreno
+python -m src.recommender.tune_markov --city-qid Q35765 --out data/reports/tune_markov_osaka.json
+
+# 3) Embeddings scoring (context/topn/hub penalty) - sin reentreno
+python -m src.recommender.tune_embeddings_scoring --city-qid Q35765 --embeddings-path src/recommender/cache/word2vec_osaka.joblib --out data/reports/tune_embedscore_osaka.json
+
+# 4) ALS (hiperparámetros) - *con reentreno* dentro del tune (rápido y limitado)
+python -m src.recommender.tune_als --city-qid Q35765 --max-trials 6 --out data/reports/tune_als_osaka.json
+
+# 5) Route planner (parámetros de itinerario) - sin reentreno
+python -m src.recommender.tune_route_planner --city-qid Q35765 --k 8 --max-trials 12 --max-cases 120 --embeddings-path src/recommender/cache/word2vec_osaka.joblib --als-path src/recommender/cache/als_osaka.joblib --out data/reports/tune_routepl_osaka.json
+
+# 6) Suite completa (genera varios JSON + un "suggested_config" final)
+python -m src.recommender.tune_all --city-qid Q35765 --embeddings-path src/recommender/cache/word2vec_osaka.joblib --als-path src/recommender/cache/als_osaka.joblib --out data/reports/tune_all_osaka.json
+```
+Notas:
+- Los rangos de búsqueda por defecto están en `configs/recommender.toml` bajo `[tune.*]`.
+- Antes de tunear, se guardó un snapshot de config en `configs/experiments/recommender_baseline_2026-02-07.toml`.
 
 Normalización de `pois.city`
 - Valores heterogéneos (ej. variantes en japonés). Unifica a `Osaka`:

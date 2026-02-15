@@ -72,7 +72,6 @@ diversity_bonus = 0.06     # small bonus for unseen categories
 [eval]
 # Settings used ONLY when running `python -m src.recommender.eval.evaluate --fair`
 # to keep fair evaluation under a few minutes.
-seed = 42
 als_factors = 64
 als_regularization = 0.01
 als_iterations = 20
@@ -85,7 +84,6 @@ emb_negative = 10
 
 [eval_routes]
 # How many top categories from user history are considered as "user preference profile"
-seed = 42
 user_top_categories = 5
 
 [markov]

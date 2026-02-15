@@ -123,6 +123,7 @@ def main() -> None:
     parser.add_argument("--min-train", type=int, default=2)
     parser.add_argument("--max-cases", type=int, default=200, help="Max users/trails to evaluate")
     parser.add_argument("--visits-limit", type=int, help="Limit visits loaded (speed)")
+    parser.add_argument("--seed", type=int, help="Semilla para muestreo reproducible (cuando hay límites)")
     parser.add_argument("--modes", nargs="+", default=["hybrid", "markov", "embed", "item", "content", "als"])
     parser.add_argument("--use-embeddings", action="store_true")
     parser.add_argument("--embeddings-path", default="src/recommender/cache/word2vec.joblib")
@@ -154,10 +155,18 @@ def main() -> None:
 
     if args.protocol == "trail":
         train_visits, test_visits = split_train_test_trails(visits, test_size=args.test_size, min_train=args.min_train)
-        case_ids = list(test_visits["trail_id"].unique())[: args.max_cases]
+        case_ids = list(test_visits["trail_id"].unique())
     else:
         train_visits, test_visits = split_train_test(visits, test_size=args.test_size, min_train=args.min_train)
-        case_ids = list(test_visits["user_id"].unique())[: args.max_cases]
+        case_ids = list(test_visits["user_id"].unique())
+
+    seed = args.seed if args.seed is not None else eval_routes_cfg.get("seed", eval_cfg.get("seed"))
+
+    # Make the evaluated subset reproducible when limiting cases.
+    if seed is not None:
+        rng = np.random.default_rng(int(seed))
+        rng.shuffle(case_ids)
+    case_ids = case_ids[: args.max_cases]
 
     if train_visits.empty or test_visits.empty or pois.empty:
         raise SystemExit("Not enough data for route evaluation (adjust filters/split).")

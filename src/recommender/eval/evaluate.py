@@ -136,6 +136,7 @@ def eval_modes(
     als_path: Optional[str] = None,
     fair: bool = False,
     protocol: str = "user",
+    seed: Optional[int] = None,
 ) -> pd.DataFrame:
     cfg = load_config(DEFAULT_CONFIG_PATH)
     hyb_cfg = cfg.get("hybrid", {})
@@ -234,6 +235,11 @@ def eval_modes(
         cases = list(test_visits["trail_id"].unique())
     else:
         cases = list(test_visits["user_id"].unique())
+
+    # Make the evaluated subset reproducible when limiting cases.
+    if seed is not None:
+        rng = np.random.default_rng(int(seed))
+        rng.shuffle(cases)
     if max_users:
         cases = cases[:max_users]
 
@@ -424,6 +430,7 @@ def main():
     )
     parser.add_argument("--max-users", type=int, help="Limitar número de usuarios evaluados")
     parser.add_argument("--visits-limit", type=int, help="Limitar visits para acelerar")
+    parser.add_argument("--seed", type=int, help="Semilla para muestreo reproducible (cuando hay límites)")
     parser.add_argument("--use-embeddings", action="store_true", help="Usar embeddings Word2Vec si existen")
     parser.add_argument("--embeddings-path", help="Ruta del modelo Word2Vec", default="src/recommender/cache/word2vec.joblib")
     parser.add_argument("--use-als", action="store_true", help="Usar modelo ALS si existe")
@@ -436,6 +443,9 @@ def main():
     parser.add_argument("--modes", nargs="+", default=["hybrid", "content", "item", "markov", "embed", "als"], help="Modos a evaluar")
     parser.add_argument("--output", help="Guardar resultados en JSON/CSV (según extensión)")
     args = parser.parse_args()
+    cfg = load_config(DEFAULT_CONFIG_PATH)
+    eval_cfg = cfg.get("eval", {})
+    seed = args.seed if args.seed is not None else eval_cfg.get("seed")
 
     conn = get_conn()
     visits = load_visits(conn, city_qid=args.city_qid, limit=args.visits_limit)
@@ -463,6 +473,7 @@ def main():
         als_path=args.als_path,
         fair=args.fair,
         protocol=args.protocol,
+        seed=seed,
     )
 
     if args.output:
