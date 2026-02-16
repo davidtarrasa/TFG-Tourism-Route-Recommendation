@@ -44,7 +44,7 @@ cold_start   = [0.60, 0.20, 0.20, 0.00, 0.00]
 
 # When we have a current POI and we are building a route step-by-step (trail-like),
 # prefer sequential signals over long-term preference models.
-trail_current = [0.0, 0.30635107904580194, 0.6100411771308729, 0.08360774382332524, 0.0]
+trail_current = [0.06310551543502063, 0.29260972812372893, 0.4785553389244702, 0.08837805858618011, 0.07735135893060004]
 
 [filters]
 exclude_categories = ["Intersection", "State", "Home (private)"]

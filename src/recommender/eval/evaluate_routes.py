@@ -33,7 +33,7 @@ from ..models.embeddings import score_embeddings_context, score_embeddings_next,
 from ..models.markov import next_poi_order2
 from ..route_planner import plan_route
 from ..utils_db import get_conn, load_poi_categories, load_pois, load_visits
-from .evaluate import split_train_test, split_train_test_trails
+from .evaluate import split_train_test, split_train_test_last_trail_user, split_train_test_trails
 from .route_metrics import compute_route_metrics
 
 
@@ -117,7 +117,7 @@ def main() -> None:
     parser.add_argument("--dsn", help="Postgres DSN (otherwise POSTGRES_DSN/DEFAULT)")
     parser.add_argument("--city", help="Optional filter over pois.city")
     parser.add_argument("--city-qid", dest="city_qid", help="Filter over visits.venue_city and pois.city_qid")
-    parser.add_argument("--protocol", choices=["user", "trail"], default="trail")
+    parser.add_argument("--protocol", choices=["user", "trail", "last_trail_user"], default="trail")
     parser.add_argument("--k", type=int, default=10, help="Route length (number of POIs)")
     parser.add_argument("--test-size", type=int, default=1)
     parser.add_argument("--min-train", type=int, default=2)
@@ -156,6 +156,9 @@ def main() -> None:
     if args.protocol == "trail":
         train_visits, test_visits = split_train_test_trails(visits, test_size=args.test_size, min_train=args.min_train)
         case_ids = list(test_visits["trail_id"].unique())
+    elif args.protocol == "last_trail_user":
+        train_visits, test_visits = split_train_test_last_trail_user(visits, min_train=args.min_train)
+        case_ids = list(test_visits["user_id"].unique())
     else:
         train_visits, test_visits = split_train_test(visits, test_size=args.test_size, min_train=args.min_train)
         case_ids = list(test_visits["user_id"].unique())
@@ -267,6 +270,25 @@ def main() -> None:
                 continue
             current_poi = str(seq_items[-1])
             prev_poi = str(seq_items[-2]) if len(seq_items) >= 2 else None
+        elif args.protocol == "last_trail_user":
+            uid = int(cid)
+            user_train = train_visits[train_visits["user_id"] == uid].sort_values("timestamp")
+            user_test = test_visits[test_visits["user_id"] == uid].sort_values("timestamp")
+            if user_train.empty or user_test.empty:
+                continue
+            user_items_seq = user_train["venue_id"].astype(str).tolist()
+            test_seq = user_test["venue_id"].astype(str).tolist()
+            if len(test_seq) < 2:
+                continue
+            # Seed = first POI of the held-out last trail.
+            current_poi = str(test_seq[0])
+            prev_poi = None
+            seen = set(user_items_seq)
+            seen.add(current_poi)
+            truth_items = [t for t in test_seq[1:] if t not in seen]
+            if not truth_items:
+                skipped_truth += 1
+                continue
         else:
             uid = int(cid)
             user_train = train_visits[train_visits["user_id"] == uid].sort_values("timestamp")

@@ -105,6 +105,43 @@ def split_train_test_trails(visits: pd.DataFrame, test_size: int = 1, min_train:
     return pd.concat(train_rows), pd.concat(test_rows)
 
 
+def split_train_test_last_trail_user(visits: pd.DataFrame, min_train: int = 1) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Split por usuario usando la última ruta completa como test.
+
+    Para cada usuario:
+    - test: todas las visitas de su último trail (por timestamp final del trail)
+    - train: el resto de visitas del usuario
+    """
+    if visits.empty:
+        return pd.DataFrame(), pd.DataFrame()
+
+    visits = visits.sort_values("timestamp")
+    train_rows = []
+    test_rows = []
+
+    for uid, group in visits.groupby("user_id"):
+        if group.empty or group["trail_id"].isna().all():
+            continue
+
+        trail_ends = group.groupby("trail_id")["timestamp"].max()
+        if trail_ends.empty:
+            continue
+        last_trail_id = trail_ends.idxmax()
+
+        test_part = group[group["trail_id"] == last_trail_id]
+        train_part = group[group["trail_id"] != last_trail_id]
+        if test_part.empty or len(train_part) < min_train:
+            continue
+
+        train_rows.append(train_part)
+        test_rows.append(test_part)
+
+    if not train_rows:
+        return pd.DataFrame(), pd.DataFrame()
+    return pd.concat(train_rows), pd.concat(test_rows)
+
+
 def compute_metrics(recs: List[str], truth: Iterable[str], k: int) -> Dict[str, float]:
     truth_set = set(truth)
     if not truth_set or not recs:
@@ -234,6 +271,8 @@ def eval_modes(
 
     if protocol == "trail":
         cases = list(test_visits["trail_id"].unique())
+    elif protocol == "last_trail_user":
+        cases = list(test_visits["user_id"].unique())
     else:
         cases = list(test_visits["user_id"].unique())
 
@@ -273,6 +312,28 @@ def eval_modes(
 
             current_poi = str(seq_items[-1])
             prev_poi = str(seq_items[-2]) if len(seq_items) >= 2 else None
+        elif protocol == "last_trail_user":
+            uid = int(case_id)
+            user_train = train_visits[train_visits["user_id"] == uid].sort_values("timestamp")
+            user_test = test_visits[test_visits["user_id"] == uid].sort_values("timestamp")
+            if user_train.empty or user_test.empty:
+                continue
+
+            user_items = user_train["venue_id"].astype(str).tolist()
+            test_seq = user_test["venue_id"].astype(str).tolist()
+            if len(test_seq) < 2:
+                continue
+
+            # Seed = first POI of the held-out last trail, truth = the remaining POIs.
+            current_poi = str(test_seq[0])
+            prev_poi = None
+            seen = set(user_items)
+            seen.add(current_poi)
+            seq_items = user_items + [current_poi]
+            truth_items = [t for t in test_seq[1:] if t not in seen]
+            if not truth_items:
+                users_skipped_all_truth_seen += 1
+                continue
         else:
             uid = int(case_id)
             user_train = train_visits[train_visits["user_id"] == uid].sort_values("timestamp")
@@ -425,9 +486,9 @@ def main():
     parser.add_argument("--min-train", type=int, default=1, help="Mínimo de visitas en train por usuario")
     parser.add_argument(
         "--protocol",
-        choices=["user", "trail"],
+        choices=["user", "trail", "last_trail_user"],
         default="user",
-        help="Como se hace el split: user (por usuario) o trail (por ruta).",
+        help="Como se hace el split: user (por usuario), trail (por ruta), last_trail_user (ultima ruta por usuario).",
     )
     parser.add_argument("--max-users", type=int, help="Limitar número de usuarios evaluados")
     parser.add_argument("--visits-limit", type=int, help="Limitar visits para acelerar")
@@ -453,8 +514,10 @@ def main():
     pois = load_pois(conn, city=args.city, city_qid=args.city_qid)
     poi_cats = load_poi_categories(conn, fsq_ids=pois["fsq_id"])
 
-    if args.protocol == 'trail':
+    if args.protocol == "trail":
         train_visits, test_visits = split_train_test_trails(visits, test_size=args.test_size, min_train=args.min_train)
+    elif args.protocol == "last_trail_user":
+        train_visits, test_visits = split_train_test_last_trail_user(visits, min_train=args.min_train)
     else:
         train_visits, test_visits = split_train_test(visits, test_size=args.test_size, min_train=args.min_train)
     if train_visits.empty or test_visits.empty:

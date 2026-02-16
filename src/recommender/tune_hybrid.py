@@ -1,7 +1,7 @@
 """Quick tuner for hybrid weights (fast, <~5 min on typical laptop).
 
 This script tunes `hybrid.trail_current` weights on a single city using an
-offline *trail* protocol (predict next POI given the previous/current POI).
+offline protocol (`trail` or `last_trail_user`).
 
 Why: hybrid weights are the easiest high-impact knob to improve results without
 retraining all models. We keep the CLI minimal; tuned weights can be copied into
@@ -22,14 +22,15 @@ import numpy as np
 import pandas as pd
 
 from .config import DEFAULT_CONFIG_PATH, load_config
-from .eval.evaluate import compute_metrics, split_train_test_trails
+from .eval.evaluate import compute_metrics, split_train_test_last_trail_user, split_train_test_trails
 from .features.cooccurrence import build_cooccurrence
 from .features.tfidf import build_tfidf
 from .features.transitions import build_transitions, build_transitions_order2
+from .features.word2vec import sequences_from_visits
 from .models.als import build_interactions, score_als, train_als
 from .models.content_based import score_content
 from .models.co_visitation import score_co_visitation
-from .models.embeddings import score_embeddings_context
+from .models.embeddings import score_embeddings_context, train_embeddings
 from .models.markov import next_poi_order2
 from .utils_db import get_conn, load_poi_categories, load_pois, load_visits
 
@@ -128,6 +129,33 @@ def build_cases(train_df: pd.DataFrame, test_df: pd.DataFrame) -> List[Case]:
     return cases
 
 
+def build_cases_last_trail_user(train_df: pd.DataFrame, test_df: pd.DataFrame) -> List[Case]:
+    """Last-trail-per-user protocol: seed with first POI from held-out last trail."""
+    if train_df.empty or test_df.empty:
+        return []
+
+    user_hist = (
+        train_df.sort_values("timestamp")
+        .groupby("user_id")["venue_id"]
+        .apply(lambda s: [str(x) for x in s.tolist()])
+    )
+
+    cases: List[Case] = []
+    for uid, g_test in test_df.groupby("user_id"):
+        g_test = g_test.sort_values("timestamp")
+        if len(g_test) < 2:
+            continue
+        items = list(user_hist.get(int(uid), []))
+        cur = str(g_test.iloc[0]["venue_id"])
+        seen = set(items)
+        seen.add(cur)
+        truth = [str(x) for x in g_test.iloc[1:]["venue_id"].tolist() if str(x) not in seen]
+        if not truth:
+            continue
+        cases.append(Case(user_id=int(uid), prev_poi=None, current_poi=cur, user_items=items, truth=truth))
+    return cases
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--city-qid", required=True, help="City QID (e.g. Q35765)")
@@ -138,6 +166,8 @@ def main() -> None:
     p.add_argument("--min-train", type=int, default=2)
     p.add_argument("--max-cases", type=int, default=250)
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--protocol", choices=["trail", "last_trail_user"], default="trail")
+    p.add_argument("--fair", action="store_true", help="Train embeddings/ALS on train split only")
 
     # Optional artifacts
     p.add_argument("--use-embeddings", action="store_true")
@@ -163,8 +193,12 @@ def main() -> None:
     if visits.empty or len(visits) < 1000:
         raise SystemExit("Not enough visits after filtering by city_qid and POIs.")
 
-    train_df, test_df = split_train_test_trails(visits, test_size=int(args.test_size), min_train=int(args.min_train))
-    cases = build_cases(train_df, test_df)
+    if args.protocol == "last_trail_user":
+        train_df, test_df = split_train_test_last_trail_user(visits, min_train=int(args.min_train))
+        cases = build_cases_last_trail_user(train_df, test_df)
+    else:
+        train_df, test_df = split_train_test_trails(visits, test_size=int(args.test_size), min_train=int(args.min_train))
+        cases = build_cases(train_df, test_df)
     rng.shuffle(cases)
     cases = cases[: int(args.max_cases)]
     if not cases:
@@ -182,9 +216,27 @@ def main() -> None:
     # Embeddings
     emb_model = None
     if args.use_embeddings:
-        if not args.embeddings_path:
-            raise SystemExit("--use-embeddings requiere --embeddings-path")
-        emb_model = joblib.load(args.embeddings_path)
+        if args.fair:
+            eval_cfg = cfg.get("eval", {})
+            emb_cfg = cfg.get("embeddings", {})
+            seqs = sequences_from_visits(train_df)
+            emb_model = train_embeddings(
+                seqs,
+                vector_size=int(eval_cfg.get("emb_vector_size", emb_cfg.get("vector_size", 128))),
+                window=int(eval_cfg.get("emb_window", emb_cfg.get("window", 15))),
+                min_count=int(emb_cfg.get("min_count", 2)),
+                workers=int(emb_cfg.get("workers", 4)),
+                epochs=int(eval_cfg.get("emb_epochs", emb_cfg.get("epochs", 10))),
+                negative=int(eval_cfg.get("emb_negative", emb_cfg.get("negative", 5))),
+                sample=float(emb_cfg.get("sample", 1e-3)),
+                ns_exponent=float(emb_cfg.get("ns_exponent", 0.75)),
+                hs=int(emb_cfg.get("hs", 0)),
+                seed=int(emb_cfg.get("seed", 42)),
+            )
+        else:
+            if not args.embeddings_path:
+                raise SystemExit("--use-embeddings requiere --embeddings-path (o usa --fair)")
+            emb_model = joblib.load(args.embeddings_path)
 
     # ALS
     als_model = None
@@ -268,6 +320,8 @@ def main() -> None:
 
     out = {
         "city_qid": args.city_qid,
+        "protocol": args.protocol,
+        "fair": bool(args.fair),
         "k": int(args.k),
         "visits_limit": int(args.visits_limit),
         "test_size": int(args.test_size),

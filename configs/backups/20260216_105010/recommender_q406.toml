@@ -1,0 +1,96 @@
+# Recommender configuration (single source of truth for training/scoring params).
+#
+# Notes:
+# - Keep CLI flags minimal; prefer changing values here and re-training.
+# - Weights order: [content, item, markov, embed, als]
+
+[embeddings]
+# Word2Vec (gensim) over sequences of visited POIs.
+# Note: "more potent" != "bigger". These defaults aim for stronger generalization
+# (skip-gram + more epochs + stronger negative sampling).
+vector_size = 300
+window = 12
+min_count = 1
+workers = 4
+epochs = 40
+negative = 15
+sample = 1e-5
+ns_exponent = 0.75
+hs = 0
+seed = 42
+
+# How many neighbors per seed POI are used to build recommendation scores.
+topn_score = 500
+
+# Use the last N items as context instead of only current POI (better sequential signal).
+context_n = 1
+
+# Penalize very popular POIs when scoring embedding neighbors.
+hub_alpha = 0.0
+
+[als]
+factors = 128
+regularization = 0.01
+iterations = 15
+alpha = 40.0
+topn_score = 500
+
+[hybrid]
+user_current = [0.10, 0.15, 0.15, 0.05, 0.55]
+user_only    = [0.10, 0.20, 0.10, 0.05, 0.55]
+current_only = [0.10, 0.15, 0.35, 0.05, 0.35]
+embed_or_als  = [0.15, 0.15, 0.10, 0.15, 0.45]
+cold_start   = [0.60, 0.20, 0.20, 0.00, 0.00]
+
+# When we have a current POI and we are building a route step-by-step (trail-like),
+# prefer sequential signals over long-term preference models.
+trail_current = [0.0, 0.30635107904580194, 0.6100411771308729, 0.08360774382332524, 0.0]
+
+[filters]
+exclude_categories = ["Intersection", "State", "Home (private)"]
+
+[prefs]
+# Score boost applied when a candidate matches one of the preferred categories.
+category_boost = 0.20
+
+[route]
+# Constraints/targets for the *ordered itinerary* (used by route evaluation).
+# These are heuristic values; tune per city scale and desired itinerary length.
+min_leg_km = 0.35    # too close below this (e.g., same block)
+max_leg_km = 5.0     # too far above this (big jump)
+max_total_km = 30.0  # soft reference (not a hard constraint)
+min_unique_cat_ratio = 0.5  # encourage diversity: >= 50% unique categories in K
+
+[route_planner]
+# Greedy route construction constraints:
+candidate_pool = 600       # how many top-scoring POIs are considered when planning a route
+max_per_category = 1
+pair_min_km = 0.30
+distance_weight = 0.20     # penalize long legs (0..1)
+distance_weight_no_anchor = 0.08  # without explicit lat/lon, keep distance as a soft signal
+max_leg_km_no_anchor = 9.0        # allow larger jumps when no start location is provided
+diversity_bonus = 0.00     # small bonus for unseen categories
+
+[eval]
+# Settings used ONLY when running `python -m src.recommender.eval.evaluate --fair`
+# to keep fair evaluation under a few minutes.
+seed = 42
+als_factors = 64
+als_regularization = 0.01
+als_iterations = 20
+als_alpha = 40.0
+
+emb_vector_size = 128
+emb_window = 10
+emb_epochs = 10
+emb_negative = 10
+
+[eval_routes]
+# How many top categories from user history are considered as "user preference profile"
+seed = 42
+user_top_categories = 5
+
+[markov]
+# Penalize very popular POIs (hubs) in Markov recommendations.
+hub_alpha = 0.0
+backoff = 0.3

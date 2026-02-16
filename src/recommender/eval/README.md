@@ -15,7 +15,10 @@ python -m src.recommender.eval.evaluate --city-qid Q35765 --protocol trail --fai
 
 Main options:
 
-- `--protocol user|trail`: split by user or by trail/session
+- `--protocol user|trail|last_trail_user`:
+  - `user`: últimas N visitas por usuario a test
+  - `trail`: últimas N visitas por trail/sesión a test
+  - `last_trail_user`: última ruta completa por usuario a test (seed = primer POI de esa ruta)
 - `--fair`: trains models on train split only (no leakage)
 - `--modes ...`: choose which engines to evaluate
 - `--seed`: reproducible case sampling

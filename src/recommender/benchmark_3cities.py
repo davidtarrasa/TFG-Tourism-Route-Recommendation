@@ -144,7 +144,11 @@ def _write_markdown(summary_path_md: str, summary: Dict[str, object]) -> None:
 
 def main() -> None:
     p = argparse.ArgumentParser(description="Run benchmark (train/eval/routes) for Q35765, Q406, Q864965")
+    p.add_argument("--run-train", action="store_true", help="Run training stage (alias of --train)")
+    p.add_argument("--run-eval", action="store_true", help="Run ranking evaluation stage")
+    p.add_argument("--run-routes", action="store_true", help="Run route evaluation stage")
     p.add_argument("--train", action="store_true", help="Train embeddings + ALS before evaluation")
+    p.add_argument("--protocol", choices=["trail", "last_trail_user"], default="last_trail_user", help="Evaluation protocol")
     p.add_argument("--train-visits-limit", type=int, default=200000)
     p.add_argument("--eval-visits-limit", type=int, default=120000)
     p.add_argument("--k-rank", type=int, default=20)
@@ -156,6 +160,15 @@ def main() -> None:
     p.add_argument("--reports-dir", default=os.path.join("data", "reports"))
     p.add_argument("--cache-dir", default=os.path.join("src", "recommender", "cache"))
     args = p.parse_args()
+
+    run_train = bool(args.train or args.run_train)
+    # Backward-compatible behavior: if user does not specify run-eval/run-routes, run both.
+    if not args.run_eval and not args.run_routes:
+        run_eval = True
+        run_routes = True
+    else:
+        run_eval = bool(args.run_eval)
+        run_routes = bool(args.run_routes)
 
     os.makedirs(args.reports_dir, exist_ok=True)
     bench_dir = os.path.join(args.reports_dir, "benchmarks")
@@ -172,7 +185,7 @@ def main() -> None:
         eval_json = os.path.join(bench_dir, f"eval_{city.slug}.json")
         eval_routes_json = os.path.join(bench_dir, f"eval_routes_{city.slug}.json")
 
-        if args.train:
+        if run_train:
             run_log.append(
                 _run(
                     [
@@ -206,88 +219,91 @@ def main() -> None:
                 )
             )
 
-        run_log.append(
-            _run(
-                [
-                    py,
-                    "-m",
-                    "src.recommender.eval.evaluate",
-                    "--city-qid",
-                    city.qid,
-                    "--protocol",
-                    "trail",
-                    "--fair",
-                    "--visits-limit",
-                    str(args.eval_visits_limit),
-                    "--k",
-                    str(args.k_rank),
-                    "--test-size",
-                    str(city.rank_test_size),
-                    "--min-train",
-                    str(args.min_train),
-                    "--max-users",
-                    str(args.max_users),
-                    "--seed",
-                    str(args.seed),
-                    "--modes",
-                    "embed",
-                    "item",
-                    "markov",
-                    "als",
-                    "hybrid",
-                    "content",
-                    "--use-embeddings",
-                    "--embeddings-path",
-                    emb_path,
-                    "--use-als",
-                    "--als-path",
-                    als_path,
-                    "--output",
-                    eval_json,
-                ],
-                f"evaluate ranking {city.slug}",
+        if run_eval:
+            run_log.append(
+                _run(
+                    [
+                        py,
+                        "-m",
+                        "src.recommender.eval.evaluate",
+                        "--city-qid",
+                        city.qid,
+                        "--protocol",
+                        args.protocol,
+                        "--fair",
+                        "--visits-limit",
+                        str(args.eval_visits_limit),
+                        "--k",
+                        str(args.k_rank),
+                        "--test-size",
+                        str(city.rank_test_size),
+                        "--min-train",
+                        str(args.min_train),
+                        "--max-users",
+                        str(args.max_users),
+                        "--seed",
+                        str(args.seed),
+                        "--modes",
+                        "embed",
+                        "item",
+                        "markov",
+                        "als",
+                        "hybrid",
+                        "content",
+                        "--use-embeddings",
+                        "--embeddings-path",
+                        emb_path,
+                        "--use-als",
+                        "--als-path",
+                        als_path,
+                        "--output",
+                        eval_json,
+                    ],
+                    f"evaluate ranking {city.slug}",
+                )
             )
-        )
 
-        run_log.append(
-            _run(
-                [
-                    py,
-                    "-m",
-                    "src.recommender.eval.evaluate_routes",
-                    "--city-qid",
-                    city.qid,
-                    "--protocol",
-                    "trail",
-                    "--test-size",
-                    str(city.route_test_size),
-                    "--k",
-                    str(args.k_route),
-                    "--max-cases",
-                    str(args.max_cases),
-                    "--visits-limit",
-                    str(args.eval_visits_limit),
-                    "--seed",
-                    str(args.seed),
-                    "--modes",
-                    "content",
-                    "item",
-                    "markov",
-                    "embed",
-                    "als",
-                    "hybrid",
-                    "--use-embeddings",
-                    "--embeddings-path",
-                    emb_path,
-                    "--use-als",
-                    "--als-path",
-                    als_path,
-                    "--output",
-                    eval_routes_json,
-                ],
-                f"evaluate routes {city.slug}",
+        if run_routes:
+            run_log.append(
+                _run(
+                    [
+                        py,
+                        "-m",
+                        "src.recommender.eval.evaluate_routes",
+                        "--city-qid",
+                        city.qid,
+                        "--protocol",
+                        args.protocol,
+                        "--test-size",
+                        str(city.route_test_size),
+                        "--k",
+                        str(args.k_route),
+                        "--max-cases",
+                        str(args.max_cases),
+                        "--visits-limit",
+                        str(args.eval_visits_limit),
+                        "--seed",
+                        str(args.seed),
+                        "--fair",
+                        "--modes",
+                        "content",
+                        "item",
+                        "markov",
+                        "embed",
+                        "als",
+                        "hybrid",
+                        "--use-embeddings",
+                        "--embeddings-path",
+                        emb_path,
+                        "--use-als",
+                        "--als-path",
+                        als_path,
+                        "--output",
+                        eval_routes_json,
+                    ],
+                    f"evaluate routes {city.slug}",
+                )
             )
-        )
 
         rank_payload = _load_json(eval_json)
         route_payload = _load_json(eval_routes_json)
