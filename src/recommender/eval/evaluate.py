@@ -137,8 +137,9 @@ def eval_modes(
     fair: bool = False,
     protocol: str = "user",
     seed: Optional[int] = None,
+    city_qid: Optional[str] = None,
 ) -> pd.DataFrame:
-    cfg = load_config(DEFAULT_CONFIG_PATH)
+    cfg = load_config(DEFAULT_CONFIG_PATH, city_qid=city_qid)
     hyb_cfg = cfg.get("hybrid", {})
     emb_cfg = cfg.get("embeddings", {})
     als_cfg = cfg.get("als", {})
@@ -443,7 +444,7 @@ def main():
     parser.add_argument("--modes", nargs="+", default=["hybrid", "content", "item", "markov", "embed", "als"], help="Modos a evaluar")
     parser.add_argument("--output", help="Guardar resultados en JSON/CSV (según extensión)")
     args = parser.parse_args()
-    cfg = load_config(DEFAULT_CONFIG_PATH)
+    cfg = load_config(DEFAULT_CONFIG_PATH, city_qid=args.city_qid)
     eval_cfg = cfg.get("eval", {})
     seed = args.seed if args.seed is not None else eval_cfg.get("seed")
 
@@ -474,6 +475,7 @@ def main():
         fair=args.fair,
         protocol=args.protocol,
         seed=seed,
+        city_qid=args.city_qid,
     )
 
     if args.output:

@@ -47,7 +47,7 @@ def main() -> None:
     p.add_argument("--seed", type=int, default=None)
     args = p.parse_args()
 
-    cfg = load_config(args.config)
+    cfg = load_config(args.config, city_qid=args.city_qid)
     tune = cfg.get("tune", {})
     tune_data = tune.get("data", {})
     tune_e = tune.get("embeddings_scoring", {})
@@ -140,4 +140,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

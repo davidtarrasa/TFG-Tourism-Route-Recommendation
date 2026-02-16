@@ -28,7 +28,7 @@ def main() -> None:
     parser.add_argument("--config", default=DEFAULT_CONFIG_PATH, help="Config TOML path")
     args = parser.parse_args()
 
-    cfg = load_config(args.config)
+    cfg = load_config(args.config, city_qid=args.city_qid)
     emb_cfg = cfg.get("embeddings", {})
 
     visits_df, _, _ = load_all(dsn=args.dsn, city=args.city, city_qid=args.city_qid, visits_limit=args.visits_limit)

@@ -29,29 +29,6 @@ from .config import DEFAULT_CONFIG_PATH, load_config
 from .prefs import Prefs, normalize_categories
 from .route_planner import plan_route
 
-_CFG = None
-
-
-def _get_cfg():
-    global _CFG
-    if _CFG is None:
-        _CFG = load_config(DEFAULT_CONFIG_PATH)
-    return _CFG
-
-
-def _cfg_get(path: str, default):
-    cur = _get_cfg()
-    for part in path.split("."):
-        if not isinstance(cur, dict) or part not in cur:
-            return default
-        cur = cur[part]
-    return cur
-
-
-# Categorias que no queremos en el top (salidas raras de Markov)
-EXCLUDE_CATEGORIES = set(_cfg_get("filters.exclude_categories", ["Intersection", "State", "Home (private)"]))
-
-
 def _normalize_scores(scores: Dict[str, float]) -> Dict[str, float]:
     """Escala 0-1 por máximo."""
     if not scores:
@@ -148,13 +125,14 @@ def recommend(
     Devuelve un DataFrame top-K con columnas:
     fsq_id, name, city, primary_category, rating, price_tier, is_free, score (+ distance_km si aplica).
     """
-    cfg = load_config(DEFAULT_CONFIG_PATH)
+    cfg = load_config(DEFAULT_CONFIG_PATH, city_qid=city_qid)
     hyb_cfg = cfg.get("hybrid", {})
     emb_cfg = cfg.get("embeddings", {})
     als_cfg = cfg.get("als", {})
     markov_cfg = cfg.get("markov", {})
     route_pl_cfg = cfg.get("route_planner", {})
     prefs_cfg = cfg.get("prefs", {})
+    exclude_categories = set(cfg.get("filters", {}).get("exclude_categories", ["Intersection", "State", "Home (private)"]))
 
     # 1) Cargar datos (filtra por ciudad si se pasa)
     visits_df, pois_df, poi_cats_df = load_all(dsn=dsn, city=city, city_qid=city_qid, visits_limit=visits_limit)
@@ -354,7 +332,7 @@ def recommend(
 
     # Filtrar categorías no deseadas
     if not candidates.empty:
-        candidates = candidates[~candidates["primary_category"].isin(EXCLUDE_CATEGORIES)]
+        candidates = candidates[~candidates["primary_category"].isin(exclude_categories)]
 
     # Preferences can set/override filters.
     if prefs is not None:

@@ -42,7 +42,7 @@ def main() -> None:
     p.add_argument("--max-trials", type=int, default=8, help="Limit number of combinations evaluated")
     args = p.parse_args()
 
-    cfg = load_config(args.config)
+    cfg = load_config(args.config, city_qid=args.city_qid)
     tune = cfg.get("tune", {})
     tune_data = tune.get("data", {})
     tune_a = tune.get("als", {})
@@ -137,4 +137,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

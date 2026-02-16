@@ -5,6 +5,7 @@ Modos y señales
 - Señales: TF-IDF de categorías, co-visitas, Markov (POI/categoría), embeddings Word2Vec, ALS implícito.
 - Re-ranking: filtros de precio/gratis, penalización de distancia (`--distance-weight`), diversidad opcional (`--no-diversify`).
 - `--build-route` genera HTML + GeoJSON en `data/reports/routes/`.
+- Config por ciudad (automatico): si existe `configs/recommender_<city_qid>.toml`, se usa ese archivo; si no, fallback a `configs/recommender.toml`.
 
 Preferencias rápidas (`--prefs`)
 - Una sola cadena separada por comas que se mapea a filtros/boosts básicos.

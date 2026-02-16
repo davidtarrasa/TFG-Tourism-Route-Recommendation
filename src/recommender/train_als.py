@@ -26,7 +26,7 @@ def main() -> None:
     parser.add_argument("--config", default=DEFAULT_CONFIG_PATH, help="Config TOML path")
     args = parser.parse_args()
 
-    cfg = load_config(args.config)
+    cfg = load_config(args.config, city_qid=args.city_qid)
     als_cfg = cfg.get("als", {})
 
     conn = get_conn(args.dsn)
@@ -58,4 +58,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

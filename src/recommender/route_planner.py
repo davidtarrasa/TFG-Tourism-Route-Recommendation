@@ -127,11 +127,15 @@ def plan_route(
                 best_idx = i
 
         if best_idx is None:
-            # Relax constraints if we get stuck: allow distances outside [min,max] but still avoid too-close.
+            # Relax constraints if we get stuck:
+            # - allow distances outside [min,max]
+            # - keep pair_min by default, but when selecting the first POI from an
+            #   explicit anchor, allow very close candidates as a safety fallback.
+            allow_close_first = anchor is not None and len(selected_rows) == 0
             for i in range(len(df)):
                 if selected_mask[i]:
                     continue
-                if dists[i] < pair_min_km:
+                if (not allow_close_first) and dists[i] < pair_min_km:
                     continue
                 cat = cat_list[i]
                 if cat and cat_counts.get(cat, 0) >= max_per_category:

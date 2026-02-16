@@ -133,7 +133,7 @@ def main() -> None:
     parser.add_argument("--output", help="Write JSON metrics to a file")
     args = parser.parse_args()
 
-    cfg = load_config(DEFAULT_CONFIG_PATH)
+    cfg = load_config(DEFAULT_CONFIG_PATH, city_qid=args.city_qid)
     hyb_cfg = cfg.get("hybrid", {})
     emb_cfg = cfg.get("embeddings", {})
     als_cfg = cfg.get("als", {})
@@ -166,7 +166,7 @@ def main() -> None:
     if seed is not None:
         rng = np.random.default_rng(int(seed))
         rng.shuffle(case_ids)
-    case_ids = case_ids[: args.max_cases]
+    max_cases = int(args.max_cases) if args.max_cases else None
 
     if train_visits.empty or test_visits.empty or pois.empty:
         raise SystemExit("Not enough data for route evaluation (adjust filters/split).")
@@ -250,6 +250,8 @@ def main() -> None:
     n_cases_used = 0
 
     for cid in case_ids:
+        if max_cases is not None and n_cases_used >= max_cases:
+            break
         # Determine current/prev POI + "seen" set for sequential context.
         if args.protocol == "trail":
             trail_train = train_visits[train_visits["trail_id"] == cid].sort_values("timestamp")

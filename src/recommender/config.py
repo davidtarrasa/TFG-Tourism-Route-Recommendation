@@ -1,11 +1,13 @@
 """Config loader for the recommender.
 
 We use TOML so we don't need extra dependencies (Python 3.11+ ships tomllib).
+Supports per-city config files:
+  - configs/recommender.toml (global fallback)
+  - configs/recommender_<city_qid>.toml (city-specific override, e.g. recommender_q35765.toml)
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any, Dict, Optional
 import os
 
@@ -22,9 +24,36 @@ def _deep_update(dst: Dict[str, Any], src: Dict[str, Any]) -> Dict[str, Any]:
     return dst
 
 
-def load_config(path: Optional[str] = None) -> Dict[str, Any]:
+def city_config_path(city_qid: str, base_path: Optional[str] = None) -> str:
+    """Build city-specific config path from QID."""
+    base = base_path or DEFAULT_CONFIG_PATH
+    city = str(city_qid).strip().lower()
+    directory = os.path.dirname(base) or "."
+    return os.path.join(directory, f"recommender_{city}.toml")
+
+
+def resolve_config_path(path: Optional[str] = None, city_qid: Optional[str] = None) -> str:
+    """
+    Resolve config path.
+
+    Rules:
+    - If explicit `path` is provided and is not the default path, use it as-is.
+    - Otherwise, if `city_qid` is provided and a city config exists, use it.
+    - Fallback to `path` or default.
+    """
+    target = path or DEFAULT_CONFIG_PATH
+    if path and os.path.normpath(path) != os.path.normpath(DEFAULT_CONFIG_PATH):
+        return target
+    if city_qid:
+        cpath = city_config_path(city_qid, base_path=DEFAULT_CONFIG_PATH)
+        if os.path.exists(cpath):
+            return cpath
+    return target
+
+
+def load_config(path: Optional[str] = None, city_qid: Optional[str] = None) -> Dict[str, Any]:
     """Load config from TOML, or return defaults if missing."""
-    path = path or DEFAULT_CONFIG_PATH
+    path = resolve_config_path(path=path, city_qid=city_qid)
 
     defaults: Dict[str, Any] = {
         "embeddings": {"vector_size": 128, "window": 15, "min_count": 2, "workers": 4, "topn_score": 1000},
@@ -49,5 +78,4 @@ def load_config(path: Optional[str] = None) -> Dict[str, Any]:
     return _deep_update(defaults, data)
 
 
-__all__ = ["DEFAULT_CONFIG_PATH", "load_config"]
-
+__all__ = ["DEFAULT_CONFIG_PATH", "city_config_path", "resolve_config_path", "load_config"]

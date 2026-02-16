@@ -100,7 +100,7 @@ def main():
             anchor = (args.lat, args.lon)
 
         # Build a better itinerary by selecting from a larger pool using route constraints.
-        cfg = load_config(DEFAULT_CONFIG_PATH)
+        cfg = load_config(DEFAULT_CONFIG_PATH, city_qid=args.city_qid)
         route_cfg = cfg.get("route", {})
         route_pl_cfg = cfg.get("route_planner", {})
 
