@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tourism Route Recommendation</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="hero" id="top">
+      <div class="hero__glow hero__glow--a"></div>
+      <div class="hero__glow hero__glow--b"></div>
+      <div class="container hero__content">
+        <p class="eyebrow">TFG Demo</p>
+        <h1>Tourism Route Recommendation</h1>
+        <p class="hero__subtitle">
+          Recomendación de rutas turísticas a partir de patrones de movilidad y POIs.
+        </p>
+        <div class="hero__actions">
+          <a class="btn btn--primary" href="#demo">Probar demo</a>
+          <a class="btn btn--ghost" href="#metodologia">Ver metodología</a>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="section section--demo" id="demo">
+        <div class="container">
+          <div class="section__head">
+            <h2>Demo interactiva</h2>
+            <p>
+              Configura la recomendación y genera una ruta. Si no hay backend disponible, se usa una respuesta mock.
+            </p>
+          </div>
+
+          <div class="demo-grid">
+            <aside class="panel">
+              <h3>Configuración</h3>
+              <form id="recommend-form" class="form">
+                <label class="field">
+                  <span>Ciudad</span>
+                  <select id="city" required>
+                    <option value="Q35765">Osaka</option>
+                    <option value="Q406">Istanbul</option>
+                    <option value="Q864965">Petaling Jaya</option>
+                  </select>
+                </label>
+
+                <label class="field">
+                  <span>Número de paradas: <strong id="stops-value">8</strong></span>
+                  <input id="stops" type="range" min="3" max="12" value="8" />
+                </label>
+
+                <fieldset class="field">
+                  <legend>Preferencias</legend>
+                  <div class="checks">
+                    <label><input type="checkbox" value="Food" />Food</label>
+                    <label><input type="checkbox" value="Culture" />Culture</label>
+                    <label><input type="checkbox" value="Nature" />Nature</label>
+                    <label><input type="checkbox" value="Nightlife" />Nightlife</label>
+                    <label><input type="checkbox" value="Shopping" />Shopping</label>
+                  </div>
+                </fieldset>
+
+                <label class="field">
+                  <span>Presupuesto</span>
+                  <select id="budget">
+                    <option value="low">Low</option>
+                    <option value="medium" selected>Medium</option>
+                    <option value="high">High</option>
+                  </select>
+                </label>
+
+                <label class="switch">
+                  <input id="proximity" type="checkbox" checked />
+                  <span>Priorizar cercanía</span>
+                </label>
+
+                <div class="field-grid">
+                  <label class="field">
+                    <span>Latitud (opcional)</span>
+                    <input id="lat" type="number" step="any" placeholder="34.6937" />
+                  </label>
+                  <label class="field">
+                    <span>Longitud (opcional)</span>
+                    <input id="lon" type="number" step="any" placeholder="135.5023" />
+                  </label>
+                </div>
+
+                <label class="field">
+                  <span>User ID (opcional)</span>
+                  <input id="user-id" type="number" placeholder="2725" />
+                </label>
+
+                <div class="form__actions">
+                  <button id="generate-btn" class="btn btn--primary" type="submit">
+                    Generar ruta
+                  </button>
+                  <button id="export-btn" class="btn btn--ghost" type="button" disabled>
+                    Exportar JSON
+                  </button>
+                  <button id="save-btn" class="btn btn--ghost" type="button" disabled>
+                    Guardar
+                  </button>
+                </div>
+              </form>
+
+              <div id="status-loading" class="state state--loading hidden" role="status">
+                <span class="spinner"></span>
+                Generando recomendación...
+              </div>
+              <div id="status-error" class="state state--error hidden"></div>
+              <div id="status-info" class="state state--info hidden"></div>
+            </aside>
+
+            <div class="results">
+              <div class="map-card card">
+                <div class="card__header">
+                  <h3>Mapa de ruta</h3>
+                  <small id="map-caption">Esperando recomendación...</small>
+                </div>
+                <div id="map"></div>
+              </div>
+
+              <div class="list-card card">
+                <div class="card__header">
+                  <h3>POIs recomendados</h3>
+                  <small id="result-meta">Sin datos</small>
+                </div>
+                <div id="poi-list" class="poi-list"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="metodologia">
+        <div class="container">
+          <div class="section__head">
+            <h2>Cómo funciona</h2>
+          </div>
+          <ul class="bullet-list">
+            <li><strong>Datos:</strong> check-ins (`std_2018`) y POIs de Foursquare enriquecidos en PostgreSQL.</li>
+            <li><strong>Motores:</strong> content-based, co-visitation, Markov secuencial y embeddings.</li>
+            <li><strong>Scoring híbrido:</strong> combinación de señales + re-ranking por distancia, restricciones y diversidad.</li>
+            <li><strong>Construcción de ruta:</strong> selección de candidatos y ordenación heurística por tramos.</li>
+            <li><strong>Salida:</strong> top-K de POIs, ruta ordenada y visualización en mapa.</li>
+          </ul>
+          <div class="pipeline card">
+            <div class="pipeline__node">Datos<br /><small>visits + pois</small></div>
+            <div class="pipeline__arrow">→</div>
+            <div class="pipeline__node">Features<br /><small>tfidf/cooc/transitions</small></div>
+            <div class="pipeline__arrow">→</div>
+            <div class="pipeline__node">Modelos<br /><small>content/item/markov/embed/als</small></div>
+            <div class="pipeline__arrow">→</div>
+            <div class="pipeline__node">Híbrido + Ruta</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section section--muted" id="arquitectura">
+        <div class="container">
+          <div class="section__head">
+            <h2>Arquitectura</h2>
+          </div>
+          <div class="cards-grid">
+            <article class="mini-card"><h3>Database</h3><p>PostgreSQL</p></article>
+            <article class="mini-card"><h3>Backend</h3><p>FastAPI (planned)</p></article>
+            <article class="mini-card"><h3>Recommender</h3><p>Python</p></article>
+            <article class="mini-card"><h3>Frontend</h3><p>Web responsive</p></article>
+            <article class="mini-card"><h3>Map</h3><p>Leaflet + tiles</p></article>
+            <article class="mini-card"><h3>Deploy</h3><p>Docker Compose</p></article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="resultados">
+        <div class="container">
+          <div class="section__head">
+            <h2>Resultados / Evaluación</h2>
+            <p>Panel placeholder para métricas offline del recomendador.</p>
+          </div>
+          <div class="metrics-grid">
+            <div class="metric card"><span>HitRate@K</span><strong>--</strong></div>
+            <div class="metric card"><span>Recall@K</span><strong>--</strong></div>
+            <div class="metric card"><span>MRR</span><strong>--</strong></div>
+            <div class="metric card"><span>NDCG</span><strong>--</strong></div>
+            <div class="metric card"><span>Diversidad</span><strong>--</strong></div>
+            <div class="metric card"><span>Distancia total</span><strong>--</strong></div>
+          </div>
+          <div class="chart card">
+            <h3>Comparativa de modelos (placeholder)</h3>
+            <div class="bars">
+              <div class="bar" style="--v: 35"><span>content</span></div>
+              <div class="bar" style="--v: 62"><span>item</span></div>
+              <div class="bar" style="--v: 58"><span>markov</span></div>
+              <div class="bar" style="--v: 49"><span>embed</span></div>
+              <div class="bar" style="--v: 65"><span>als</span></div>
+              <div class="bar" style="--v: 72"><span>hybrid</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section section--muted" id="faq">
+        <div class="container">
+          <div class="section__head">
+            <h2>FAQ</h2>
+          </div>
+          <div class="faq">
+            <details>
+              <summary>¿La demo usa datos reales?</summary>
+              <p>Sí, el sistema está preparado para usar datos reales en PostgreSQL; si no hay backend, se muestra un mock.</p>
+            </details>
+            <details>
+              <summary>¿Qué ocurre si no pongo punto de inicio?</summary>
+              <p>La recomendación prioriza señales de preferencias/historial y aplica una penalización de distancia más suave.</p>
+            </details>
+            <details>
+              <summary>¿Se puede integrar con una API?</summary>
+              <p>Sí. La demo está preparada para conectar con un endpoint `POST /recommend` o `POST /recommend/multi`.</p>
+            </details>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="container footer__content">
+        <p>Autor: David</p>
+        <p>Tutor: Pablo</p>
+        <nav>
+          <a href="#">GitHub</a>
+          <a href="#">Memoria (PDF)</a>
+          <a href="#">Contacto</a>
+        </nav>
+      </div>
+    </footer>
+
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
