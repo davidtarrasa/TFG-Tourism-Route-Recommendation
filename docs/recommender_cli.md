@@ -75,6 +75,15 @@ Salida consolidada:
 - `data/reports/benchmarks/benchmark_3cities_summary.json`
 - `data/reports/benchmarks/benchmark_3cities_summary.md`
 
+Contrato multi-ruta (prototipo CLI)
+```bash
+# Usuario con historial + inputs + ubicacion -> puede generar history/inputs/location/full
+python -m src.recommender.multi_route_cli --city-qid Q35765 --user-id 2725 --current-poi 4b3ae51bf964a520956f25e3 --lat 34.6937 --lon 135.5023 --prefs "museum,park,cheap" --use-embeddings --embeddings-path src/recommender/cache/word2vec_q35765.joblib --use-als --als-path src/recommender/cache/als_q35765.joblib --build-route --out-dir data/reports/routes/multi_route_osaka --out-json data/reports/multi_route_osaka.json
+
+# Usuario nuevo (sin historial) con inputs/ubicacion -> omite history/full segun contrato
+python -m src.recommender.multi_route_cli --city-qid Q35765 --user-id 99999999 --current-poi 4b3ae51bf964a520956f25e3 --lat 34.6937 --lon 135.5023 --prefs "museum,park,cheap" --use-embeddings --embeddings-path src/recommender/cache/word2vec_q35765.joblib --use-als --als-path src/recommender/cache/als_q35765.joblib --build-route --out-dir data/reports/routes/multi_route_osaka_new --out-json data/reports/multi_route_osaka_new.json
+```
+
 Normalización de `pois.city`
 - Valores heterogéneos (ej. variantes en japonés). Unifica a `Osaka`:
 ```bash
