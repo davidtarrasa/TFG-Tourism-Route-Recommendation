@@ -151,13 +151,15 @@ Estado de implementacion de multi-ruta
 - Pendiente: endpoint/servicio que devuelva en una respuesta varias rutas (`history`, `inputs`, `location`, `full`) segun señales disponibles.
 
 
-Benchmark unico 3 ciudades (pendiente)
---------------------------------------
-Objetivo: un solo script/comando que ejecute, para `Q35765`, `Q406`, `Q864965`:
+Benchmark unico 3 ciudades (implementado)
+-----------------------------------------
+Comando: `python -m src.recommender.benchmark_3cities` (o `--train`).
+
+Ejecuta, para `Q35765`, `Q406`, `Q864965`:
 1) entrenamiento (si se solicita), 2) evaluate ranking, 3) evaluate_routes, 4) resumen comparativo.
 
 Salida esperada:
 - JSON por ciudad (`eval_*`, `eval_routes_*`)
-- un resumen consolidado (`data/reports/benchmark_3cities_summary.json`)
+- un resumen consolidado (`data/reports/benchmarks/benchmark_3cities_summary.json`)
 - opcional CSV/tabla markdown para informe del TFG.
 

@@ -63,6 +63,18 @@ Notas:
 - Los rangos de búsqueda por defecto están en `configs/recommender.toml` bajo `[tune.*]`.
 - Antes de tunear, se guardó un snapshot de config en `configs/experiments/recommender_baseline_2026-02-07.toml`.
 
+Benchmark único (3 ciudades)
+```bash
+# Solo evaluar (usa modelos ya entrenados)
+python -m src.recommender.benchmark_3cities
+
+# Entrenar + evaluar todo en una ejecución
+python -m src.recommender.benchmark_3cities --train
+```
+Salida consolidada:
+- `data/reports/benchmarks/benchmark_3cities_summary.json`
+- `data/reports/benchmarks/benchmark_3cities_summary.md`
+
 Normalización de `pois.city`
 - Valores heterogéneos (ej. variantes en japonés). Unifica a `Osaka`:
 ```bash
