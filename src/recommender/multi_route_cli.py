@@ -19,6 +19,7 @@ import pandas as pd
 
 from .multi_route_service import build_multi_routes
 from .prefs import parse_prefs
+from .scorer import recommend
 from .route_builder import build_route, to_folium_map, to_geojson
 from .route_planner import plan_route
 from .utils_db import get_conn, load_pois
@@ -35,6 +36,7 @@ def _ensure_latlon(df: pd.DataFrame, dsn: Optional[str], city: Optional[str], ci
 def _build_route_outputs(
     *,
     df: pd.DataFrame,
+    df_pool: Optional[pd.DataFrame],
     dsn: Optional[str],
     city: Optional[str],
     city_qid: Optional[str],
@@ -53,11 +55,12 @@ def _build_route_outputs(
     route_cfg = cfg.get("route", {})
     route_pl_cfg = cfg.get("route_planner", {})
 
-    df = _ensure_latlon(df, dsn=dsn, city=city, city_qid=city_qid)
+    planning_df = df_pool if (df_pool is not None and not df_pool.empty) else df
+    planning_df = _ensure_latlon(planning_df, dsn=dsn, city=city, city_qid=city_qid)
     anchor = (lat, lon) if (lat is not None and lon is not None) else None
 
     planned = plan_route(
-        df,
+        planning_df,
         k=int(k),
         anchor=anchor,
         min_leg_km=float(route_cfg.get("min_leg_km", 0.3)),
@@ -65,8 +68,14 @@ def _build_route_outputs(
         pair_min_km=float(route_pl_cfg.get("pair_min_km", 0.2)),
         max_per_category=int(route_pl_cfg.get("max_per_category", 2)),
         distance_weight=float(route_pl_cfg.get("distance_weight", 0.35)),
+        distance_weight_with_anchor=float(route_pl_cfg.get("distance_weight_with_anchor"))
+        if route_pl_cfg.get("distance_weight_with_anchor") is not None
+        else None,
         distance_weight_no_anchor=float(route_pl_cfg.get("distance_weight_no_anchor"))
         if route_pl_cfg.get("distance_weight_no_anchor") is not None
+        else None,
+        max_leg_km_with_anchor=float(route_pl_cfg.get("max_leg_km_with_anchor"))
+        if route_pl_cfg.get("max_leg_km_with_anchor") is not None
         else None,
         max_leg_km_no_anchor=float(route_pl_cfg.get("max_leg_km_no_anchor"))
         if route_pl_cfg.get("max_leg_km_no_anchor") is not None
@@ -78,7 +87,7 @@ def _build_route_outputs(
         rr = build_route(planned.ordered_df, anchor_lat=anchor[0] if anchor else None, anchor_lon=anchor[1] if anchor else None)
         ordered_df = rr.ordered_df
     else:
-        rr = build_route(df.head(k), anchor_lat=anchor[0] if anchor else None, anchor_lon=anchor[1] if anchor else None)
+        rr = build_route(planning_df.head(k), anchor_lat=anchor[0] if anchor else None, anchor_lon=anchor[1] if anchor else None)
         ordered_df = rr.ordered_df
 
     gj = to_geojson(ordered_df)
@@ -158,17 +167,123 @@ def main() -> None:
             print(df.head(args.k))
 
     if args.build_route:
+        from .config import DEFAULT_CONFIG_PATH, load_config
+
         os.makedirs(args.out_dir, exist_ok=True)
+        cfg = load_config(DEFAULT_CONFIG_PATH, city_qid=args.city_qid)
+        route_pl_cfg = cfg.get("route_planner", {})
+        pool_k = max(int(route_pl_cfg.get("candidate_pool", max(500, int(args.k) * 50))), int(args.k))
         for name, df in result.routes.items():
+            # Build a larger candidate pool (as in cli.py) so route planning has enough options.
+            pool_df: Optional[pd.DataFrame] = None
+            try:
+                if name == "history":
+                    pool_df = recommend(
+                        dsn=args.dsn,
+                        city=args.city,
+                        city_qid=args.city_qid,
+                        user_id=args.user_id,
+                        current_poi=None,
+                        k=pool_k,
+                        visits_limit=args.visits_limit,
+                        mode="hybrid",
+                        use_embeddings=args.use_embeddings,
+                        embeddings_path=args.embeddings_path,
+                        use_als=args.use_als,
+                        als_path=args.als_path,
+                        lat=None,
+                        lon=None,
+                        max_price_tier=None,
+                        free_only=False,
+                        prefs=None,
+                        distance_weight=0.0,
+                        diversify=False,
+                    )
+                elif name == "inputs":
+                    pool_df = recommend(
+                        dsn=args.dsn,
+                        city=args.city,
+                        city_qid=args.city_qid,
+                        user_id=None,
+                        current_poi=None,
+                        k=pool_k,
+                        visits_limit=args.visits_limit,
+                        mode="content",
+                        use_embeddings=False,
+                        embeddings_path=args.embeddings_path,
+                        use_als=False,
+                        als_path=args.als_path,
+                        lat=None,
+                        lon=None,
+                        max_price_tier=args.max_price_tier,
+                        free_only=args.free_only,
+                        prefs=prefs,
+                        distance_weight=0.0,
+                        diversify=False,
+                    )
+                elif name == "location":
+                    pool_df = recommend(
+                        dsn=args.dsn,
+                        city=args.city,
+                        city_qid=args.city_qid,
+                        user_id=None,
+                        current_poi=args.current_poi,
+                        k=pool_k,
+                        visits_limit=args.visits_limit,
+                        mode="hybrid",
+                        use_embeddings=args.use_embeddings,
+                        embeddings_path=args.embeddings_path,
+                        use_als=False,
+                        als_path=args.als_path,
+                        lat=args.lat,
+                        lon=args.lon,
+                        max_price_tier=None,
+                        free_only=False,
+                        prefs=None,
+                        distance_weight=0.9,
+                        diversify=False,
+                    )
+                elif name == "full":
+                    full_mode = "hybrid"
+                    has_history = bool(result.request_signals.get("history"))
+                    has_inputs = bool(result.request_signals.get("inputs"))
+                    has_location = bool(result.request_signals.get("location"))
+                    if has_inputs and not has_history and not has_location:
+                        full_mode = "content"
+                    pool_df = recommend(
+                        dsn=args.dsn,
+                        city=args.city,
+                        city_qid=args.city_qid,
+                        user_id=args.user_id if has_history else None,
+                        current_poi=args.current_poi,
+                        k=pool_k,
+                        visits_limit=args.visits_limit,
+                        mode=full_mode,
+                        use_embeddings=args.use_embeddings,
+                        embeddings_path=args.embeddings_path,
+                        use_als=args.use_als if has_history else False,
+                        als_path=args.als_path,
+                        lat=args.lat if has_location else None,
+                        lon=args.lon if has_location else None,
+                        max_price_tier=args.max_price_tier if has_inputs else None,
+                        free_only=args.free_only if has_inputs else False,
+                        prefs=prefs if has_inputs else None,
+                        distance_weight=0.35 if has_location else 0.0,
+                        diversify=False,
+                    )
+            except Exception:
+                pool_df = None
+
             html_path = os.path.join(args.out_dir, f"route_{name}.html")
             geo_path = os.path.join(args.out_dir, f"route_{name}.geojson")
             out_html, out_geo = _build_route_outputs(
                 df=df,
+                df_pool=pool_df,
                 dsn=args.dsn,
                 city=args.city,
                 city_qid=args.city_qid,
-                lat=args.lat,
-                lon=args.lon,
+                lat=args.lat if name in ("location", "full") else None,
+                lon=args.lon if name in ("location", "full") else None,
                 out_html=html_path,
                 out_geojson=geo_path,
                 k=args.k,

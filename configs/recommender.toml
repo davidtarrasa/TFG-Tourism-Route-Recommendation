@@ -67,7 +67,9 @@ candidate_pool = 1000       # how many top-scoring POIs are considered when plan
 max_per_category = 2
 pair_min_km = 0.22
 distance_weight = 0.35     # penalize long legs (0..1)
+distance_weight_with_anchor = 0.55 # stronger locality when an explicit start location exists
 distance_weight_no_anchor = 0.08  # without explicit lat/lon, keep distance as a soft signal
+max_leg_km_with_anchor = 3.2       # tighter max jump when an explicit start location exists
 max_leg_km_no_anchor = 9.0        # allow larger jumps when no start location is provided
 diversity_bonus = 0.06     # small bonus for unseen categories
 

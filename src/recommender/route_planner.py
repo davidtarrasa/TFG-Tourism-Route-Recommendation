@@ -41,8 +41,10 @@ def plan_route(
     pair_min_km: float = 0.2,
     max_per_category: int = 2,
     distance_weight: float = 0.35,
+    distance_weight_with_anchor: Optional[float] = None,
     distance_weight_no_anchor: Optional[float] = None,
     max_leg_km_no_anchor: Optional[float] = None,
+    max_leg_km_with_anchor: Optional[float] = None,
     diversity_bonus: float = 0.05,
 ) -> PlannedRoute:
     """
@@ -60,9 +62,21 @@ def plan_route(
 
     # Start point for legs: anchor if provided, otherwise first selected POI.
     # If there is no explicit anchor, distance should not dominate ranking.
+    # If there is an explicit anchor, we can enforce stronger locality.
     dw = float(distance_weight)
     leg_max = float(max_leg_km)
-    if anchor is None:
+    if anchor is not None:
+        if distance_weight_with_anchor is not None:
+            dw = float(distance_weight_with_anchor)
+        else:
+            # Default stricter behavior with explicit start location.
+            dw = float(dw * 1.35)
+        if max_leg_km_with_anchor is not None:
+            leg_max = float(max_leg_km_with_anchor)
+        else:
+            # Default tighter maximum leg with explicit start location.
+            leg_max = float(leg_max * 0.65)
+    else:
         if distance_weight_no_anchor is not None:
             dw = float(distance_weight_no_anchor)
         if max_leg_km_no_anchor is not None:

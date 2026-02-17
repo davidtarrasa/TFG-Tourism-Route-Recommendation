@@ -15,13 +15,13 @@ Rules:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import pandas as pd
 
 from .prefs import Prefs
 from .scorer import recommend
-from .utils_db import get_conn, load_pois
+from .utils_db import get_conn
 
 
 @dataclass
@@ -45,25 +45,6 @@ def _has_inputs(prefs: Optional[Prefs], free_only: bool, max_price_tier: Optiona
     if max_price_tier is not None:
         return True
     return False
-
-
-def _resolve_anchor_from_current(
-    dsn: Optional[str],
-    city: Optional[str],
-    city_qid: Optional[str],
-    current_poi: Optional[str],
-) -> Optional[Tuple[float, float]]:
-    if not current_poi:
-        return None
-    try:
-        conn = get_conn(dsn)
-        pois = load_pois(conn, city=city, city_qid=city_qid)
-        row = pois[pois["fsq_id"].astype(str) == str(current_poi)]
-        if row.empty:
-            return None
-        return float(row.iloc[0]["lat"]), float(row.iloc[0]["lon"])
-    except Exception:
-        return None
 
 
 def _user_exists(dsn: Optional[str], user_id: Optional[int], city_qid: Optional[str]) -> bool:
@@ -102,14 +83,11 @@ def build_multi_routes(
     use_als: bool = False,
     als_path: Optional[str] = None,
 ) -> MultiRouteResult:
-    location_present = (lat is not None and lon is not None) or (current_poi is not None)
+    # "location" signal means explicit geographic start from request lat/lon.
+    # current_poi can still be used as contextual sequence signal, but does not
+    # activate the location-only route by itself.
+    location_present = lat is not None and lon is not None
     inputs_present = _has_inputs(prefs=prefs, free_only=free_only, max_price_tier=max_price_tier)
-
-    # If only current_poi is provided, derive anchor lat/lon from POI for distance-aware routes.
-    if (lat is None or lon is None) and current_poi:
-        anchor = _resolve_anchor_from_current(dsn=dsn, city=city, city_qid=city_qid, current_poi=current_poi)
-        if anchor is not None:
-            lat, lon = anchor
 
     user_exists = _user_exists(dsn=dsn, user_id=user_id, city_qid=city_qid)
     history_present = user_exists
@@ -205,10 +183,10 @@ def build_multi_routes(
             als_path=als_path,
             lat=lat,
             lon=lon,
-            max_price_tier=max_price_tier if inputs_present else None,
-            free_only=free_only if inputs_present else False,
-            prefs=prefs if inputs_present else None,
-            distance_weight=0.8,
+            max_price_tier=None,
+            free_only=False,
+            prefs=None,
+            distance_weight=0.9,
             diversify=True,
         )
         if df.empty:
@@ -218,35 +196,37 @@ def build_multi_routes(
     else:
         omitted["location"] = "missing_location"
 
-    # 4) full route: requires all 3 signals.
-    if history_present and inputs_present and location_present:
-        df = recommend(
-            dsn=dsn,
-            city=city,
-            city_qid=city_qid,
-            user_id=user_id,
-            current_poi=current_poi,
-            k=k,
-            visits_limit=visits_limit,
-            mode="hybrid",
-            use_embeddings=use_embeddings,
-            embeddings_path=embeddings_path,
-            use_als=use_als,
-            als_path=als_path,
-            lat=lat,
-            lon=lon,
-            max_price_tier=max_price_tier,
-            free_only=free_only,
-            prefs=prefs,
-            distance_weight=0.35,
-            diversify=True,
-        )
-        if df.empty:
-            omitted["full"] = "empty_result"
-        else:
-            routes["full"] = df
+    # 4) full route: use all available request signals (do not require all 3).
+    full_mode = "hybrid"
+    if inputs_present and not history_present and not location_present:
+        # If only inputs exist, keep full aligned with input-dominant behavior.
+        full_mode = "content"
+
+    df = recommend(
+        dsn=dsn,
+        city=city,
+        city_qid=city_qid,
+        user_id=user_id if history_present else None,
+        current_poi=current_poi,
+        k=k,
+        visits_limit=visits_limit,
+        mode=full_mode,
+        use_embeddings=use_embeddings,
+        embeddings_path=embeddings_path,
+        use_als=use_als if history_present else False,
+        als_path=als_path,
+        lat=lat if location_present else None,
+        lon=lon if location_present else None,
+        max_price_tier=max_price_tier if inputs_present else None,
+        free_only=free_only if inputs_present else False,
+        prefs=prefs if inputs_present else None,
+        distance_weight=0.35 if location_present else 0.0,
+        diversify=True,
+    )
+    if df.empty:
+        omitted["full"] = "empty_result"
     else:
-        omitted["full"] = "requires_history_inputs_location"
+        routes["full"] = df
 
     if not routes:
         warnings.append("no_routes_generated")
