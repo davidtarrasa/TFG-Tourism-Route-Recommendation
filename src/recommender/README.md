@@ -153,7 +153,10 @@ Estado de implementacion de multi-ruta
 
 Benchmark unico 3 ciudades (implementado)
 -----------------------------------------
-Comando: `python -m src.recommender.benchmark_3cities` (o `--train`).
+Comando recomendado:
+- `python -m src.recommender.benchmark_3cities --run-eval --run-routes`
+- opcional entrenamiento: `--run-train` (o `--train`)
+- protocolo por defecto: `last_trail_user` (override con `--protocol trail`)
 
 Ejecuta, para `Q35765`, `Q406`, `Q864965`:
 1) entrenamiento (si se solicita), 2) evaluate ranking, 3) evaluate_routes, 4) resumen comparativo.
@@ -162,4 +165,26 @@ Salida esperada:
 - JSON por ciudad (`eval_*`, `eval_routes_*`)
 - un resumen consolidado (`data/reports/benchmarks/benchmark_3cities_summary.json`)
 - opcional CSV/tabla markdown para informe del TFG.
+
+
+Protocolo principal de evaluacion (actual)
+------------------------------------------
+- `last_trail_user`:
+  - si un usuario tiene solo 1 trail, ese trail se queda en train (no test)
+  - si tiene >=2 trails, se usa el ultimo trail como test solo si tiene al menos 4 POIs
+  - el resto de trails van a train
+  - seed de prediccion = primer POI del trail de test
+  - verdad objetivo = resto de POIs del trail de test no vistos
+
+Metricas ranking principales:
+- `hit@k`
+- `precision@k`
+- `recall@k`
+- `ndcg@k`
+- `novelty`
+- `diversity`
+
+Nota de inferencia:
+- Para usuario registrado (`user_id` con historial), se excluyen POIs ya visitados de la recomendacion final.
+- Para usuario nuevo/no registrado, ese filtro no aplica.
 

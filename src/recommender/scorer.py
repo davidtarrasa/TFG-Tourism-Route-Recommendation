@@ -327,6 +327,11 @@ def recommend(
     if current_poi:
         candidates = candidates[candidates["fsq_id"] != current_poi]
 
+    # Registered users: do not recommend already visited POIs.
+    if user_id is not None and user_items:
+        seen_items = set([str(x) for x in user_items])
+        candidates = candidates[~candidates["fsq_id"].astype(str).isin(seen_items)]
+
     # Eliminar candidatos sin metadatos mínimos
     candidates = candidates.dropna(subset=["name", "primary_category", "lat", "lon"], how="any")
 

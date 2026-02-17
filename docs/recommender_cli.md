@@ -29,13 +29,13 @@ Nota (PowerShell/Windows): no uses `\\` para continuar lÃ­neas; usa una sola l
 
 Evaluación offline
 ```bash
-python -m src.recommender.eval.evaluate --city-qid Q35765 --k 20 --test-size 1 --min-train 1 --max-users 50 --seed 42 --use-als --als-path src/recommender/cache/als_osaka.joblib --use-embeddings --embeddings-path src/recommender/cache/word2vec_osaka.joblib
+python -m src.recommender.eval.evaluate --city-qid Q35765 --protocol last_trail_user --fair --k 20 --test-size 1 --min-train 2 --min-test-pois 4 --max-users 300 --seed 42 --modes embed item markov als hybrid content --use-als --als-path src/recommender/cache/als_q35765.joblib --use-embeddings --embeddings-path src/recommender/cache/word2vec_q35765.joblib
 ```
-- Métricas: HitRate, Recall, MRR, NDCG (hold-out por usuario); imprime usuarios evaluados.
+- Métricas principales: Hit@K, Precision@K, Recall@K, nDCG@K, Novedad y Diversidad.
 
 Evaluación de rutas (calidad del itinerario)
 ```bash
-python -m src.recommender.eval.evaluate_routes --city-qid Q35765 --protocol trail --k 10 --max-cases 200 --seed 42 --modes content item markov embed als hybrid --use-als --als-path src/recommender/cache/als_osaka.joblib --use-embeddings --embeddings-path src/recommender/cache/word2vec_osaka.joblib --output data/reports/eval_routes_osaka.json
+python -m src.recommender.eval.evaluate_routes --city-qid Q35765 --protocol last_trail_user --fair --k 8 --max-cases 200 --min-test-pois 4 --seed 42 --modes content item markov embed als hybrid --use-als --als-path src/recommender/cache/als_q35765.joblib --use-embeddings --embeddings-path src/recommender/cache/word2vec_q35765.joblib --output data/reports/eval_routes_q35765.json
 ```
 - Métricas: distancia total, distancias entre paradas (demasiado cerca/lejos), diversidad de categorías y match con perfil de categorías del usuario.
 
@@ -66,10 +66,10 @@ Notas:
 Benchmark único (3 ciudades)
 ```bash
 # Solo evaluar (usa modelos ya entrenados)
-python -m src.recommender.benchmark_3cities
+python -m src.recommender.benchmark_3cities --run-eval --run-routes
 
 # Entrenar + evaluar todo en una ejecución
-python -m src.recommender.benchmark_3cities --train
+python -m src.recommender.benchmark_3cities --run-train --run-eval --run-routes
 ```
 Salida consolidada:
 - `data/reports/benchmarks/benchmark_3cities_summary.json`

@@ -44,13 +44,21 @@ python -m src.recommender.cli --city-qid Q35765 --user-id 2725 --mode hybrid --k
 Ranking metrics:
 
 ```bash
-python -m src.recommender.eval.evaluate --city-qid Q35765 --protocol trail --fair --visits-limit 120000 --k 20 --test-size 1 --min-train 2 --max-users 300 --modes embed item markov als hybrid content --use-embeddings --embeddings-path src/recommender/cache/word2vec_q35765.joblib --use-als --als-path src/recommender/cache/als_q35765.joblib --output data/reports/eval_q35765_current.json
+python -m src.recommender.eval.evaluate --city-qid Q35765 --protocol last_trail_user --fair --visits-limit 120000 --k 20 --test-size 1 --min-train 2 --min-test-pois 4 --max-users 300 --modes embed item markov als hybrid content --use-embeddings --embeddings-path src/recommender/cache/word2vec_q35765.joblib --use-als --als-path src/recommender/cache/als_q35765.joblib --output data/reports/eval_q35765_current.json
 ```
+
+Current primary ranking metrics:
+- `hit@k`
+- `precision@k`
+- `recall@k`
+- `ndcg@k`
+- `novelty`
+- `diversity`
 
 Route metrics:
 
 ```bash
-python -m src.recommender.eval.evaluate_routes --city-qid Q35765 --protocol trail --k 8 --max-cases 200 --visits-limit 120000 --modes content item markov embed als hybrid --use-embeddings --embeddings-path src/recommender/cache/word2vec_q35765.joblib --use-als --als-path src/recommender/cache/als_q35765.joblib --output data/reports/eval_routes_q35765_current.json
+python -m src.recommender.eval.evaluate_routes --city-qid Q35765 --protocol last_trail_user --k 8 --max-cases 200 --visits-limit 120000 --min-test-pois 4 --modes content item markov embed als hybrid --use-embeddings --embeddings-path src/recommender/cache/word2vec_q35765.joblib --use-als --als-path src/recommender/cache/als_q35765.joblib --output data/reports/eval_routes_q35765_current.json
 ```
 
 ## Configuration

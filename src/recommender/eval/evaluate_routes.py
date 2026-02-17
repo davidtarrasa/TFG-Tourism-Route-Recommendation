@@ -121,6 +121,7 @@ def main() -> None:
     parser.add_argument("--k", type=int, default=10, help="Route length (number of POIs)")
     parser.add_argument("--test-size", type=int, default=1)
     parser.add_argument("--min-train", type=int, default=2)
+    parser.add_argument("--min-test-pois", type=int, default=4, help="Mínimo de POIs en test para last_trail_user")
     parser.add_argument("--max-cases", type=int, default=200, help="Max users/trails to evaluate")
     parser.add_argument("--visits-limit", type=int, help="Limit visits loaded (speed)")
     parser.add_argument("--seed", type=int, help="Semilla para muestreo reproducible (cuando hay límites)")
@@ -157,7 +158,11 @@ def main() -> None:
         train_visits, test_visits = split_train_test_trails(visits, test_size=args.test_size, min_train=args.min_train)
         case_ids = list(test_visits["trail_id"].unique())
     elif args.protocol == "last_trail_user":
-        train_visits, test_visits = split_train_test_last_trail_user(visits, min_train=args.min_train)
+        train_visits, test_visits = split_train_test_last_trail_user(
+            visits,
+            min_train=args.min_train,
+            min_test_pois=args.min_test_pois,
+        )
         case_ids = list(test_visits["user_id"].unique())
     else:
         train_visits, test_visits = split_train_test(visits, test_size=args.test_size, min_train=args.min_train)

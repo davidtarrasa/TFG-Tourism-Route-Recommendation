@@ -105,7 +105,11 @@ def split_train_test_trails(visits: pd.DataFrame, test_size: int = 1, min_train:
     return pd.concat(train_rows), pd.concat(test_rows)
 
 
-def split_train_test_last_trail_user(visits: pd.DataFrame, min_train: int = 1) -> Tuple[pd.DataFrame, pd.DataFrame]:
+def split_train_test_last_trail_user(
+    visits: pd.DataFrame,
+    min_train: int = 1,
+    min_test_pois: int = 4,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Split por usuario usando la última ruta completa como test.
 
@@ -122,24 +126,56 @@ def split_train_test_last_trail_user(visits: pd.DataFrame, min_train: int = 1) -
 
     for uid, group in visits.groupby("user_id"):
         if group.empty or group["trail_id"].isna().all():
+            train_rows.append(group)
             continue
 
-        trail_ends = group.groupby("trail_id")["timestamp"].max()
-        if trail_ends.empty:
+        trail_ends = group.groupby("trail_id")["timestamp"].max().sort_values()
+        # Keep users with only one trail entirely in TRAIN.
+        if trail_ends.empty or len(trail_ends) < 2:
+            train_rows.append(group)
             continue
-        last_trail_id = trail_ends.idxmax()
 
+        last_trail_id = trail_ends.index[-1]
         test_part = group[group["trail_id"] == last_trail_id]
         train_part = group[group["trail_id"] != last_trail_id]
-        if test_part.empty or len(train_part) < min_train:
-            continue
 
-        train_rows.append(train_part)
-        test_rows.append(test_part)
+        # Test only if last trail is meaningful (>= min_test_pois), otherwise keep all in TRAIN.
+        if len(test_part) >= int(min_test_pois) and len(train_part) >= min_train:
+            train_rows.append(train_part)
+            test_rows.append(test_part)
+        else:
+            train_rows.append(group)
 
-    if not train_rows:
-        return pd.DataFrame(), pd.DataFrame()
-    return pd.concat(train_rows), pd.concat(test_rows)
+    train_df = pd.concat(train_rows) if train_rows else pd.DataFrame()
+    test_df = pd.concat(test_rows) if test_rows else pd.DataFrame()
+    return train_df, test_df
+
+
+def _novelty_at_k(rec_ids: List[str], item_counts: Dict[str, int]) -> float:
+    """Average novelty in [0,1], higher means less popular recommendations."""
+    if not rec_ids:
+        return 0.0
+    total = float(sum(item_counts.values()))
+    vocab = float(max(len(item_counts), 1))
+    denom = total + vocab
+    max_novelty = -np.log2(1.0 / denom) if denom > 1 else 1.0
+    vals = []
+    for rid in rec_ids:
+        c = float(item_counts.get(str(rid), 0))
+        p = (c + 1.0) / denom
+        vals.append(float(-np.log2(p)) / max_novelty if max_novelty > 0 else 0.0)
+    return float(np.mean(vals))
+
+
+def _diversity_at_k(rec_ids: List[str], poi_primary_map: Dict[str, str]) -> float:
+    """Category coverage ratio in [0,1]."""
+    if not rec_ids:
+        return 0.0
+    cats = []
+    for rid in rec_ids:
+        c = poi_primary_map.get(str(rid))
+        cats.append(str(c) if c and str(c) != "nan" else "__unknown__")
+    return float(len(set(cats)) / len(cats))
 
 
 def compute_metrics(recs: List[str], truth: Iterable[str], k: int) -> Dict[str, float]:
@@ -185,6 +221,9 @@ def eval_modes(
 
     # Popularity counts for hub penalty (avoid ultra-popular POIs dominating results).
     item_counts: Dict[str, int] = train_visits["venue_id"].astype(str).value_counts().to_dict()
+    poi_primary_map: Dict[str, str] = {}
+    if not pois.empty and "fsq_id" in pois.columns and "primary_category" in pois.columns:
+        poi_primary_map = {str(k): str(v) for k, v in pois.set_index("fsq_id")["primary_category"].to_dict().items()}
     # Features globales sobre train
     tfidf_matrix, tfidf_ids, _ = build_tfidf(poi_cats)
     co_mat, id_to_idx, idx_to_id = build_cooccurrence(train_visits)
@@ -462,8 +501,19 @@ def eval_modes(
             # Evaluate against *new* POIs -> remove already-seen items from the recommendation list.
             rec_ids = [r[0] for r in recs_sorted if r[0] not in seen][:k]
             m = compute_metrics(rec_ids, truth_items, k)
-            for key, val in m.items():
-                metrics_acc[(mode, key)].append(val)
+            truth_set = set(truth_items)
+            hits = sum(1 for r in rec_ids if r in truth_set)
+            precision = float(hits / max(int(k), 1))
+            novelty = _novelty_at_k(rec_ids, item_counts=item_counts)
+            diversity = _diversity_at_k(rec_ids, poi_primary_map=poi_primary_map)
+
+            # Main metrics requested by tutor (+ hit for quick compatibility checks).
+            metrics_acc[(mode, "hit")].append(float(m.get("hit", 0.0)))
+            metrics_acc[(mode, "precision")].append(precision)
+            metrics_acc[(mode, "recall")].append(float(m.get("recall", 0.0)))
+            metrics_acc[(mode, "ndcg")].append(float(m.get("ndcg", 0.0)))
+            metrics_acc[(mode, "novelty")].append(novelty)
+            metrics_acc[(mode, "diversity")].append(diversity)
         users_evaluated.add(uid)
 
     # Agregar métricas
@@ -484,6 +534,7 @@ def main():
     parser.add_argument("--k", type=int, default=10, help="Top-K para métricas")
     parser.add_argument("--test-size", type=int, default=1, help="Últimas visitas al test")
     parser.add_argument("--min-train", type=int, default=1, help="Mínimo de visitas en train por usuario")
+    parser.add_argument("--min-test-pois", type=int, default=4, help="Mínimo de POIs en test para last_trail_user")
     parser.add_argument(
         "--protocol",
         choices=["user", "trail", "last_trail_user"],
@@ -517,7 +568,11 @@ def main():
     if args.protocol == "trail":
         train_visits, test_visits = split_train_test_trails(visits, test_size=args.test_size, min_train=args.min_train)
     elif args.protocol == "last_trail_user":
-        train_visits, test_visits = split_train_test_last_trail_user(visits, min_train=args.min_train)
+        train_visits, test_visits = split_train_test_last_trail_user(
+            visits,
+            min_train=args.min_train,
+            min_test_pois=args.min_test_pois,
+        )
     else:
         train_visits, test_visits = split_train_test(visits, test_size=args.test_size, min_train=args.min_train)
     if train_visits.empty or test_visits.empty:

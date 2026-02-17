@@ -2,7 +2,7 @@
 
 This folder contains two evaluators:
 
-- `evaluate.py`: next-POI ranking metrics (`hit`, `recall`, `mrr`, `ndcg`)
+- `evaluate.py`: next-POI ranking metrics (`hit@k`, `precision@k`, `recall@k`, `ndcg@k`, `novelty`, `diversity`)
 - `evaluate_routes.py`: route-level quality metrics (distance coherence + category diversity)
 
 ## 1) Ranking Evaluation
@@ -19,6 +19,7 @@ Main options:
   - `user`: últimas N visitas por usuario a test
   - `trail`: últimas N visitas por trail/sesión a test
   - `last_trail_user`: última ruta completa por usuario a test (seed = primer POI de esa ruta)
+- `--min-test-pois`: para `last_trail_user`, tamaño mínimo del trail de test (por defecto `4`)
 - `--fair`: trains models on train split only (no leakage)
 - `--modes ...`: choose which engines to evaluate
 - `--seed`: reproducible case sampling

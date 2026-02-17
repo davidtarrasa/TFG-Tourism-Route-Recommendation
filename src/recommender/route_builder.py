@@ -469,12 +469,40 @@ def to_folium_map(
             + "</div>"
         )
 
+    # Small numbered badges over markers to make route order visually explicit.
+    badge_css = """
+    <style>
+      .route-order-badge {
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: #0b3d91;
+        color: #fff;
+        font-size: 11px;
+        font-weight: 800;
+        line-height: 20px;
+        text-align: center;
+        border: 2px solid #ffffff;
+        box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
+      }
+    </style>
+    """
+    m.get_root().html.add_child(folium.Element(badge_css))
+
     # Marcadores
     for idx, row in df.iterrows():
+        lat = float(row["lat"])
+        lon = float(row["lon"])
         folium.Marker(
-            [float(row["lat"]), float(row["lon"])],
+            [lat, lon],
+            icon=folium.DivIcon(
+                html=f"<div class='route-order-badge'>{idx+1}</div>",
+                icon_size=(20, 20),
+                icon_anchor=(10, 10),
+                class_name="route-order-icon",
+            ),
             popup=f"{idx+1}. {row['name']} ({row.get('primary_category','')})",
-            tooltip=row["name"],
+            tooltip=f"Orden {idx+1}",
         ).add_to(m)
 
     # Anchor

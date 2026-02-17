@@ -112,15 +112,15 @@ def _write_markdown(summary_path_md: str, summary: Dict[str, object]) -> None:
 
         rank = city.get("ranking_by_mode", {})
         if isinstance(rank, dict) and rank:
-            lines.append("### Ranking (Hit/MRR/NDCG/Recall)")
+            lines.append("### Ranking (Hit@K / Precision@K / Recall@K / nDCG@K / Novedad / Diversidad)")
             lines.append("")
-            lines.append("| mode | hit | mrr | ndcg | recall |")
-            lines.append("|---|---:|---:|---:|---:|")
+            lines.append("| mode | hit | precision | recall | ndcg | novelty | diversity |")
+            lines.append("|---|---:|---:|---:|---:|---:|---:|")
             for mode, vals in rank.items():
                 if not isinstance(vals, dict):
                     continue
                 lines.append(
-                    f"| {mode} | {vals.get('hit', 0.0):.6f} | {vals.get('mrr', 0.0):.6f} | {vals.get('ndcg', 0.0):.6f} | {vals.get('recall', 0.0):.6f} |"
+                    f"| {mode} | {vals.get('hit', 0.0):.6f} | {vals.get('precision', 0.0):.6f} | {vals.get('recall', 0.0):.6f} | {vals.get('ndcg', 0.0):.6f} | {vals.get('novelty', 0.0):.6f} | {vals.get('diversity', 0.0):.6f} |"
                 )
             lines.append("")
 
