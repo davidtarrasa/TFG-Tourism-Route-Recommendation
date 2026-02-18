@@ -43,11 +43,17 @@ def main():
         "--prefs",
         help='Preferencias en una cadena separada por comas (ej: "museum,park,free,cheap")',
     )
+    parser.add_argument(
+        "--category-mode",
+        choices=["soft", "strict"],
+        default="soft",
+        help="Modo de categorias: soft=boost, strict=filtro duro por categorias/intenciones",
+    )
     parser.add_argument("--distance-weight", dest="distance_weight", type=float, default=0.3, help="Peso penalización distancia [0-1]")
     parser.add_argument("--no-diversify", dest="diversify", action="store_false", help="Desactivar diversidad por categoría")
     args = parser.parse_args()
 
-    prefs = parse_prefs(args.prefs)
+    prefs = parse_prefs(args.prefs, category_mode=args.category_mode)
 
     df = recommend(
         dsn=args.dsn,

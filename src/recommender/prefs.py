@@ -29,6 +29,7 @@ class Prefs:
     categories: List[str]
     free_only: Optional[bool] = None  # True=only free, False=only paid, None=no filter
     max_price_tier: Optional[int] = None
+    category_mode: str = "soft"  # soft|strict
 
 
 def _to_int(s: str) -> Optional[int]:
@@ -38,9 +39,12 @@ def _to_int(s: str) -> Optional[int]:
         return None
 
 
-def parse_prefs(prefs: Optional[str]) -> Prefs:
+def parse_prefs(prefs: Optional[str], category_mode: str = "soft") -> Prefs:
+    mode = (category_mode or "soft").strip().lower()
+    if mode not in ("soft", "strict"):
+        mode = "soft"
     if not prefs:
-        return Prefs(categories=[])
+        return Prefs(categories=[], category_mode=mode)
 
     tokens = [t.strip() for t in prefs.split(",") if t.strip()]
     categories: List[str] = []
@@ -77,7 +81,7 @@ def parse_prefs(prefs: Optional[str]) -> Prefs:
         # Default: treat as category preference.
         categories.append(t)
 
-    return Prefs(categories=categories, free_only=free_only, max_price_tier=max_price_tier)
+    return Prefs(categories=categories, free_only=free_only, max_price_tier=max_price_tier, category_mode=mode)
 
 
 def normalize_categories(categories: Sequence[str]) -> List[str]:
@@ -97,4 +101,3 @@ def normalize_categories(categories: Sequence[str]) -> List[str]:
 
 
 __all__ = ["Prefs", "parse_prefs", "normalize_categories"]
-

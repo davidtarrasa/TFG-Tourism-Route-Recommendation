@@ -27,6 +27,7 @@ from .models.markov import next_poi, next_poi_order2
 from .models.als import score_als
 from .config import DEFAULT_CONFIG_PATH, load_config
 from .prefs import Prefs, normalize_categories
+from .category_intents import INCONCLUSIVE, classify_category_intent, infer_user_intents
 from .route_planner import plan_route
 
 def _normalize_scores(scores: Dict[str, float]) -> Dict[str, float]:
@@ -357,9 +358,10 @@ def recommend(
         candidates["price_tier"] = pd.to_numeric(candidates["price_tier"], errors="coerce")
         candidates = candidates[(candidates["price_tier"].isna()) | (candidates["price_tier"] <= max_price_tier)]
 
-    # Category preference boost (soft, not a hard filter).
+    # Category preference boost and intent filtering (soft/strict).
     if prefs is not None and prefs.categories and not candidates.empty:
         pref_cats = set([c.lower() for c in normalize_categories(prefs.categories)])
+        pref_intents = set(infer_user_intents(prefs.categories))
         if pref_cats:
             # Build a per-POI set of category names (including primary_category).
             cats_by_id = (
@@ -367,24 +369,80 @@ def recommend(
                 if not poi_cats_df.empty
                 else pd.Series(dtype=object)
             )
+            cats_by_id = cats_by_id.to_dict() if hasattr(cats_by_id, "to_dict") else {}
+
+            intents_cfg = cfg.get("category_intents", {})
+            use_intents = bool(intents_cfg.get("enabled", True))
+            use_semantic = bool(intents_cfg.get("use_semantic", True))
+            semantic_threshold = float(intents_cfg.get("semantic_threshold", 0.42))
+            strict_min_conf = float(prefs_cfg.get("strict_min_confidence", 0.35))
+            intent_boost = float(prefs_cfg.get("intent_boost", 0.3))
+            inconclusive_penalty = float(prefs_cfg.get("inconclusive_penalty", 0.8))
+            mode = (getattr(prefs, "category_mode", "soft") or "soft").lower()
 
             def _matches(fid: str, primary: Optional[str]) -> bool:
                 s = set()
                 if primary:
                     s.add(str(primary).lower())
-                extra = cats_by_id.get(fid)
+                extra = cats_by_id.get(str(fid))
                 if isinstance(extra, set):
                     s |= extra
                 return bool(s & pref_cats)
+
+            def _poi_intents(fid: str, primary: Optional[str]) -> Tuple[set, float]:
+                names = set()
+                if primary:
+                    names.add(str(primary))
+                extra = cats_by_id.get(str(fid))
+                if isinstance(extra, set):
+                    names |= set([str(x) for x in extra if x])
+                intents = set()
+                max_conf = 0.0
+                for nm in names:
+                    intent, conf, _ = classify_category_intent(
+                        nm,
+                        use_semantic=use_semantic,
+                        semantic_threshold=semantic_threshold,
+                    )
+                    if conf > max_conf:
+                        max_conf = float(conf)
+                    intents.add(intent)
+                return intents, max_conf
 
             boost = float(prefs_cfg.get("category_boost", 0.2))
             candidates["pref_match"] = candidates.apply(
                 lambda r: _matches(str(r["fsq_id"]), r.get("primary_category")),
                 axis=1,
             )
-            candidates.loc[candidates["pref_match"] == True, "score"] = candidates.loc[  # noqa: E712
-                candidates["pref_match"] == True, "score"
-            ] * (1.0 + boost)
+            candidates.loc[candidates["pref_match"] == True, "score"] = candidates.loc[candidates["pref_match"] == True, "score"] * (1.0 + boost)  # noqa: E712
+
+            if use_intents:
+                poi_intents_info = candidates.apply(
+                    lambda r: _poi_intents(str(r["fsq_id"]), r.get("primary_category")),
+                    axis=1,
+                )
+                candidates["poi_intents"] = poi_intents_info.apply(lambda x: x[0])
+                candidates["poi_intent_conf"] = poi_intents_info.apply(lambda x: x[1])
+                candidates["intent_match"] = candidates["poi_intents"].apply(
+                    lambda s: bool((s - {INCONCLUSIVE}) & pref_intents) if isinstance(s, set) else False
+                )
+                # Soft mode: boost matching intents, mildly penalize inconclusive-only POIs.
+                if mode != "strict":
+                    candidates.loc[candidates["intent_match"] == True, "score"] = candidates.loc[  # noqa: E712
+                        candidates["intent_match"] == True, "score"
+                    ] * (1.0 + intent_boost)
+                    candidates["only_inconclusive"] = candidates["poi_intents"].apply(
+                        lambda s: isinstance(s, set) and len(s) > 0 and (s - {INCONCLUSIVE}) == set()
+                    )
+                    candidates.loc[candidates["only_inconclusive"] == True, "score"] = candidates.loc[  # noqa: E712
+                        candidates["only_inconclusive"] == True, "score"
+                    ] * inconclusive_penalty
+                else:
+                    # Strict mode: keep only category OR intent matches with enough confidence.
+                    strict_mask = (candidates["pref_match"] == True) | (  # noqa: E712
+                        (candidates["intent_match"] == True) & (candidates["poi_intent_conf"] >= strict_min_conf)  # noqa: E712
+                    )
+                    candidates = candidates[strict_mask]
 
     # Re-ranking por distancia SOLO si hay ubicacion explicita (lat/lon).
     # Si no se proporciona, dejamos que el ranking lo dominen las senales del modelo.

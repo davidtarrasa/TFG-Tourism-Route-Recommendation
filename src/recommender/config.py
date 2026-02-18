@@ -66,6 +66,17 @@ def load_config(path: Optional[str] = None, city_qid: Optional[str] = None) -> D
             "cold_start": [0.6, 0.2, 0.2, 0.0, 0.0],
         },
         "filters": {"exclude_categories": ["Intersection", "State", "Home (private)"]},
+        "prefs": {
+            "category_boost": 0.2,
+            "intent_boost": 0.3,
+            "inconclusive_penalty": 0.8,
+            "strict_min_confidence": 0.35,
+        },
+        "category_intents": {
+            "enabled": True,
+            "use_semantic": True,
+            "semantic_threshold": 0.42,
+        },
     }
 
     if not os.path.exists(path):

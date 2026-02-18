@@ -114,6 +114,12 @@ def main() -> None:
     p.add_argument("--lat", type=float, help="Current latitude")
     p.add_argument("--lon", type=float, help="Current longitude")
     p.add_argument("--prefs", help='Comma-separated prefs, e.g. "museum,park,free,cheap"')
+    p.add_argument(
+        "--category-mode",
+        choices=["soft", "strict"],
+        default="soft",
+        help="Category mode: soft=boost, strict=hard-filter by preferred intents/categories",
+    )
     p.add_argument("--max-price-tier", dest="max_price_tier", type=int, help="price_tier <= N")
     p.add_argument("--free-only", dest="free_only", action="store_true", help="Only free POIs")
     p.add_argument("--k", type=int, default=10)
@@ -127,7 +133,7 @@ def main() -> None:
     p.add_argument("--out-json", default=os.path.join("data", "reports", "multi_route_result.json"))
     args = p.parse_args()
 
-    prefs = parse_prefs(args.prefs)
+    prefs = parse_prefs(args.prefs, category_mode=args.category_mode)
     result = build_multi_routes(
         dsn=args.dsn,
         city=args.city,
