@@ -12,7 +12,7 @@ Current project state:
 - Offline evaluation for ranking and routes working
 - Tuning scripts working (`tune_all` + per-component tuners)
 
-Web/API layer is still pending (CLI is currently the execution interface).
+Web/API layer basic step is available in `src/recommender/api.py` (FastAPI).
 
 ## Quick Start
 
@@ -38,6 +38,49 @@ Run inference + build route map:
 ```bash
 python -m src.recommender.cli --city-qid Q35765 --user-id 2725 --mode hybrid --k 10 --use-embeddings --embeddings-path src/recommender/cache/word2vec_q35765.joblib --use-als --als-path src/recommender/cache/als_q35765.joblib --lat 34.6937 --lon 135.5023 --build-route --route-output data/reports/routes/route_q35765_hybrid.html --geojson-output data/reports/routes/route_q35765_hybrid.geojson
 ```
+
+## Architecture
+
+- `frontend/`: web interface (HTML/CSS/JS)
+- `src/recommender/api.py`: FastAPI backend (business logic gateway)
+- `src/recommender/*`: recommender logic and models
+- PostgreSQL (Docker): data store (`visits`, `pois`, `poi_categories`)
+
+Recommended flow for product mode:
+
+`Frontend -> FastAPI -> PostgreSQL + Recommender`
+
+Notes:
+- Browser should not connect directly to PostgreSQL.
+- Backend remains necessary even with local DB, because it centralizes access, validation, and model execution.
+
+## API (Step 1)
+
+Run server:
+
+```bash
+python -m uvicorn src.recommender.api:app --reload --port 8000
+```
+
+Endpoints:
+- `GET /health`
+- `POST /recommend`
+- `POST /multi-recommend`
+
+## Frontend
+
+Run a static server from repo root:
+
+```bash
+python -m http.server 8081
+```
+
+Open:
+- `http://localhost:8081/frontend/`
+
+PowerShell helpers:
+- `.\scripts\run_api.ps1`
+- `.\scripts\run_frontend.ps1`
 
 ## Evaluation
 
@@ -75,3 +118,4 @@ python -m src.recommender.eval.evaluate_routes --city-qid Q35765 --protocol last
 - CLI guide: `docs/recommender_cli.md`
 - Evaluation docs: `src/recommender/eval/README.md`
 - Reports/maps: `data/reports/`
+- Frontend docs: `frontend/README.md`

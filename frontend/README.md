@@ -1,4 +1,4 @@
-# Web Demo (Frontend)
+# Frontend Demo
 
 One-page responsive demo for:
 - request configuration
@@ -8,7 +8,7 @@ One-page responsive demo for:
 ## Run locally
 
 Option 1 (quick):
-- Open `web/index.html` directly in the browser.
+- Open `frontend/index.html` directly in the browser.
 
 Option 2 (recommended):
 - Serve with a static server from repo root:
@@ -18,7 +18,7 @@ python -m http.server 8081
 ```
 
 Then open:
-- `http://localhost:8081/web/`
+- `http://localhost:8081/frontend/`
 
 ## Backend integration
 
@@ -29,6 +29,6 @@ If backend is not available, it automatically shows a mock response.
 
 ## Files
 
-- `web/index.html`
-- `web/styles.css`
-- `web/app.js`
+- `frontend/index.html`
+- `frontend/styles.css`
+- `frontend/app.js`
