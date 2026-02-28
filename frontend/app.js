@@ -38,6 +38,7 @@ const poiList = document.getElementById("poi-list");
 const resultMeta = document.getElementById("result-meta");
 const mapCaption = document.getElementById("map-caption");
 const routeVariants = document.getElementById("route-variants");
+const routeSummary = document.getElementById("route-summary");
 
 function initMap() {
   map = L.map("map", { zoomControl: true }).setView(CITY_META.Q35765.center, 12);
@@ -287,12 +288,53 @@ function renderVariants(variants, activeKey, onSelect) {
   routeVariants.innerHTML = "";
 
   keys.forEach((key) => {
+    const n = (variants[key]?.results || []).length;
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = `variant-btn ${key === activeKey ? "is-active" : ""}`;
-    btn.textContent = VARIANT_LABEL[key] || key;
+    btn.textContent = `${VARIANT_LABEL[key] || key} (${n})`;
     btn.addEventListener("click", () => onSelect(key));
     routeVariants.appendChild(btn);
+  });
+}
+
+function renderVariantSummary(variants, activeKey, onSelect) {
+  const keys = Object.keys(variants || {});
+  if (!keys.length) {
+    routeSummary.innerHTML = "";
+    routeSummary.classList.add("hidden");
+    return;
+  }
+
+  routeSummary.classList.remove("hidden");
+  routeSummary.innerHTML = "";
+
+  keys.forEach((key) => {
+    const rows = variants[key]?.results || [];
+    const avgRating = rows.length
+      ? (
+          rows.reduce((acc, r) => acc + (Number(r.rating) || 0), 0) / rows.length
+        ).toFixed(2)
+      : "--";
+    const totalDist = rows.reduce(
+      (acc, r) => acc + (Number(r.distance_km) || 0),
+      0
+    );
+
+    const card = document.createElement("article");
+    card.className = `route-summary-card ${
+      key === activeKey ? "is-active" : ""
+    }`;
+    card.innerHTML = `
+      <h5>${VARIANT_LABEL[key] || key}</h5>
+      <div class="route-summary-meta">
+        <span>${rows.length} POIs</span>
+        <span>rating medio: ${avgRating}</span>
+        <span>dist: ${totalDist.toFixed(2)} km</span>
+      </div>
+    `;
+    card.addEventListener("click", () => onSelect(key));
+    routeSummary.appendChild(card);
   });
 }
 
@@ -334,6 +376,10 @@ function renderSelectedVariant(source) {
   renderMap(pois, currentResult.city, selected);
   renderList(pois, currentResult.city, source, selected);
   renderVariants(currentResult.routes, selected, (nextKey) => {
+    currentResult.selectedVariant = nextKey;
+    renderSelectedVariant(source);
+  });
+  renderVariantSummary(currentResult.routes, selected, (nextKey) => {
     currentResult.selectedVariant = nextKey;
     renderSelectedVariant(source);
   });

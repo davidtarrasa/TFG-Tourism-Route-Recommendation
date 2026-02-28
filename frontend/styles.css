@@ -361,6 +361,39 @@ fieldset {
   color: #fff;
 }
 
+.route-summary {
+  margin-top: 0.7rem;
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.route-summary-card {
+  border: 1px solid #d4e1f0;
+  border-radius: 12px;
+  padding: 0.55rem 0.65rem;
+  background: #f9fcff;
+  cursor: pointer;
+}
+
+.route-summary-card.is-active {
+  border-color: #0a84ff;
+  box-shadow: 0 0 0 2px #ddebff inset;
+}
+
+.route-summary-card h5 {
+  margin: 0 0 0.25rem;
+  font-size: 0.86rem;
+}
+
+.route-summary-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
 .poi-item {
   border: 1px solid #d4e1f0;
   border-radius: 12px;
