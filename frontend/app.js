@@ -5,6 +5,20 @@ const CITY_META = {
 };
 
 const CATEGORY_POOL = ["Food", "Culture", "Nature", "Nightlife", "Shopping"];
+const VARIANT_ORDER = ["full", "history", "inputs", "location"];
+const VARIANT_LABEL = {
+  full: "Full",
+  history: "History",
+  inputs: "Inputs",
+  location: "Location",
+};
+
+function apiBaseUrl() {
+  const q = new URLSearchParams(window.location.search).get("api");
+  if (q) return q.replace(/\/$/, "");
+  const { protocol, hostname } = window.location;
+  return `${protocol}//${hostname}:8000`;
+}
 
 let map;
 let markersLayer;
@@ -23,6 +37,7 @@ const loadingState = document.getElementById("status-loading");
 const poiList = document.getElementById("poi-list");
 const resultMeta = document.getElementById("result-meta");
 const mapCaption = document.getElementById("map-caption");
+const routeVariants = document.getElementById("route-variants");
 
 function initMap() {
   map = L.map("map", { zoomControl: true }).setView(CITY_META.Q35765.center, 12);
@@ -64,18 +79,37 @@ function buildPayload() {
   const latRaw = document.getElementById("lat").value;
   const lonRaw = document.getElementById("lon").value;
   const userIdRaw = document.getElementById("user-id").value;
+  const budget = document.getElementById("budget").value;
   const prefs = readPreferences();
+  const proximity = document.getElementById("proximity").checked;
+
+  const lat = latRaw ? Number(latRaw) : null;
+  const lon = lonRaw ? Number(lonRaw) : null;
+  const userId = userIdRaw ? Number(userIdRaw) : null;
+
+  // Map UI selections into backend prefs string.
+  const prefTokens = [...prefs];
+  if (budget === "low") prefTokens.push("cheap");
+  if (budget === "high") prefTokens.push("expensive");
 
   return {
     city_qid: cityQid,
+    user_id: userId,
     k: Number(stopsInput.value),
-    preferences: prefs,
-    budget: document.getElementById("budget").value,
-    max_price_tier: budgetToTier(document.getElementById("budget").value),
-    prioritize_proximity: document.getElementById("proximity").checked,
-    lat: latRaw ? Number(latRaw) : null,
-    lon: lonRaw ? Number(lonRaw) : null,
-    user_id: userIdRaw ? Number(userIdRaw) : null,
+    lat,
+    lon,
+    prefs: prefTokens.join(","),
+    max_price_tier: budgetToTier(budget),
+    free_only: false,
+    category_mode: "soft",
+    use_embeddings: true,
+    embeddings_path: `src/recommender/cache/word2vec_${cityQid.toLowerCase()}.joblib`,
+    use_als: true,
+    als_path: `src/recommender/cache/als_${cityQid.toLowerCase()}.joblib`,
+    visits_limit: 120000,
+    build_route: false,
+    // UI-only hint for frontend selection (not sent to backend logic directly).
+    _prefer_location: proximity,
   };
 }
 
@@ -95,13 +129,13 @@ function toKm(a, b) {
   return 2 * R * Math.asin(Math.sqrt(x));
 }
 
-function makeMockResponse(payload) {
+function makeMockRoute(payload, type) {
   const city = CITY_META[payload.city_qid] || CITY_META.Q35765;
-  const center = payload.lat && payload.lon ? [payload.lat, payload.lon] : city.center;
-  const selectedCats = payload.preferences.length ? payload.preferences : CATEGORY_POOL;
+  const center =
+    payload.lat && payload.lon ? [payload.lat, payload.lon] : city.center;
+  const selectedCats = payload.prefs ? payload.prefs.split(",") : CATEGORY_POOL;
   const pois = [];
   let prev = center;
-
   for (let i = 0; i < payload.k; i += 1) {
     const lat = center[0] + randomBetween(-0.03, 0.03);
     const lon = center[1] + randomBetween(-0.03, 0.03);
@@ -109,37 +143,57 @@ function makeMockResponse(payload) {
     const dist = toKm(prev, point);
     prev = point;
     pois.push({
-      order: i + 1,
-      fsq_id: `mock_${payload.city_qid}_${i + 1}`,
+      fsq_id: `mock_${payload.city_qid}_${type}_${i + 1}`,
       name: `POI ${i + 1} · ${city.name}`,
-      primary_category: selectedCats[i % selectedCats.length],
+      primary_category: selectedCats[i % selectedCats.length] || "Culture",
       rating: Number(randomBetween(6.4, 9.3).toFixed(2)),
       distance_km: Number(dist.toFixed(2)),
       lat,
       lon,
     });
   }
+  return { results: pois };
+}
 
+function makeMockResponse(payload) {
   return {
-    source: "mock",
-    city: city.name,
-    route: {
-      mode: "hybrid",
-      pois,
+    signals: {
+      history: !!payload.user_id,
+      inputs: !!payload.prefs,
+      location: payload.lat != null && payload.lon != null,
     },
-    request: payload,
+    user_exists: !!payload.user_id,
+    omitted: {},
+    warnings: ["mock_response"],
+    routes: {
+      full: makeMockRoute(payload, "full"),
+      history: makeMockRoute(payload, "history"),
+      inputs: makeMockRoute(payload, "inputs"),
+      location: makeMockRoute(payload, "location"),
+    },
   };
 }
 
+function selectPrimaryRoute(routes, preferLocation) {
+  const keys = Object.keys(routes || {});
+  if (!keys.length) return null;
+  if (preferLocation && routes.location) return "location";
+  return VARIANT_ORDER.find((k) => routes[k]) || keys[0];
+}
+
 async function fetchRecommendation(payload) {
+  const api = apiBaseUrl();
+  const requestPayload = { ...payload };
+  delete requestPayload._prefer_location;
   try {
-    const response = await fetch("/recommend", {
+    const response = await fetch(`${api}/multi-recommend`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(requestPayload),
     });
     if (!response.ok) {
-      throw new Error(`Backend error ${response.status}`);
+      const text = await response.text();
+      throw new Error(`Backend ${response.status}: ${text}`);
     }
     const data = await response.json();
     return { data, source: "backend", warning: "" };
@@ -152,43 +206,35 @@ async function fetchRecommendation(payload) {
   }
 }
 
-function normalizeResult(data) {
-  if (Array.isArray(data?.route?.pois)) {
-    return {
-      city: data.city || "Unknown",
-      routeType: data.route.mode || "hybrid",
-      pois: data.route.pois,
-    };
-  }
-
-  if (Array.isArray(data?.routes) && data.routes.length) {
-    const first = data.routes[0];
-    return {
-      city: data.city || "Unknown",
-      routeType: first.type || "route",
-      pois: first.pois || [],
-    };
-  }
-
-  return { city: "Unknown", routeType: "unknown", pois: [] };
+function routeWithOrder(route) {
+  const rows = route?.results || [];
+  return rows.map((p, idx) => ({ ...p, order: idx + 1 }));
 }
 
-function renderMap(pois, cityName) {
+function renderMap(pois, cityName, variant) {
   markersLayer.clearLayers();
   routeLayer.clearLayers();
-  if (!pois.length) return;
+  if (!pois.length) {
+    mapCaption.textContent = "Sin POIs para dibujar";
+    return;
+  }
 
-  const latlngs = pois.map((p) => [p.lat, p.lon]);
+  const latlngs = pois
+    .filter((p) => p.lat != null && p.lon != null)
+    .map((p) => [p.lat, p.lon]);
+  if (!latlngs.length) return;
+
   const bounds = L.latLngBounds(latlngs);
   map.fitBounds(bounds.pad(0.2));
 
   L.polyline(latlngs, {
     color: "#0a84ff",
     weight: 5,
-    opacity: 0.86,
+    opacity: 0.9,
   }).addTo(routeLayer);
 
   pois.forEach((poi) => {
+    if (poi.lat == null || poi.lon == null) return;
     const marker = L.circleMarker([poi.lat, poi.lon], {
       radius: 9,
       color: "#0a6bd1",
@@ -198,13 +244,13 @@ function renderMap(pois, cityName) {
     }).addTo(markersLayer);
     marker.bindTooltip(`${poi.order}. ${poi.name}`, { direction: "top" });
     marker.bindPopup(
-      `<strong>${poi.order}. ${poi.name}</strong><br/>${poi.primary_category} · Rating: ${
+      `<strong>${poi.order}. ${poi.name}</strong><br/>${poi.primary_category || "N/A"} · Rating: ${
         poi.rating ?? "N/A"
       }`
     );
   });
 
-  mapCaption.textContent = `Ruta en ${cityName} · ${pois.length} paradas`;
+  mapCaption.textContent = `${cityName} · ${VARIANT_LABEL[variant] || variant} · ${pois.length} paradas`;
 }
 
 function renderList(pois, city, source, routeType) {
@@ -213,8 +259,7 @@ function renderList(pois, city, source, routeType) {
     resultMeta.textContent = "Sin resultados";
     return;
   }
-  resultMeta.textContent = `${city} · modo ${routeType} · fuente: ${source}`;
-
+  resultMeta.textContent = `${city} · ruta ${routeType} · fuente: ${source}`;
   pois.forEach((poi) => {
     const item = document.createElement("article");
     item.className = "poi-item";
@@ -230,8 +275,31 @@ function renderList(pois, city, source, routeType) {
   });
 }
 
+function renderVariants(variants, activeKey, onSelect) {
+  const keys = Object.keys(variants || {});
+  if (!keys.length) {
+    routeVariants.innerHTML = "";
+    routeVariants.classList.add("hidden");
+    return;
+  }
+
+  routeVariants.classList.remove("hidden");
+  routeVariants.innerHTML = "";
+
+  keys.forEach((key) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = `variant-btn ${key === activeKey ? "is-active" : ""}`;
+    btn.textContent = VARIANT_LABEL[key] || key;
+    btn.addEventListener("click", () => onSelect(key));
+    routeVariants.appendChild(btn);
+  });
+}
+
 function downloadJSON(obj, filename) {
-  const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" });
+  const blob = new Blob([JSON.stringify(obj, null, 2)], {
+    type: "application/json",
+  });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -247,11 +315,28 @@ function saveCurrentResult() {
   prev.push({
     saved_at: new Date().toISOString(),
     city: currentResult.city,
-    routeType: currentResult.routeType,
+    selectedVariant: currentResult.selectedVariant,
     payload: currentResult.raw,
   });
   localStorage.setItem(key, JSON.stringify(prev));
   setInfo(`Ruta guardada en localStorage (${prev.length} guardadas).`);
+}
+
+function cityNameFromQid(qid) {
+  return CITY_META[qid]?.name || qid || "Unknown";
+}
+
+function renderSelectedVariant(source) {
+  if (!currentResult) return;
+  const selected = currentResult.selectedVariant;
+  const route = currentResult.routes[selected];
+  const pois = routeWithOrder(route);
+  renderMap(pois, currentResult.city, selected);
+  renderList(pois, currentResult.city, source, selected);
+  renderVariants(currentResult.routes, selected, (nextKey) => {
+    currentResult.selectedVariant = nextKey;
+    renderSelectedVariant(source);
+  });
 }
 
 stopsInput.addEventListener("input", () => {
@@ -261,7 +346,7 @@ stopsInput.addEventListener("input", () => {
 exportBtn.addEventListener("click", () => {
   if (!currentResult) return;
   const cityName = currentResult.city.toLowerCase().replace(/\s+/g, "_");
-  downloadJSON(currentResult.raw, `route_${cityName}.json`);
+  downloadJSON(currentResult.raw, `multi_route_${cityName}.json`);
 });
 
 saveBtn.addEventListener("click", saveCurrentResult);
@@ -274,19 +359,31 @@ form.addEventListener("submit", async (event) => {
 
   const payload = buildPayload();
   const { data, source, warning } = await fetchRecommendation(payload);
-  const normalized = normalizeResult(data);
+  const routes = data?.routes || {};
+  const selectedVariant = selectPrimaryRoute(routes, payload._prefer_location);
+
+  if (!selectedVariant) {
+    setLoading(false);
+    setError("No se han generado rutas para esta petición.");
+    return;
+  }
 
   currentResult = {
-    city: normalized.city,
-    routeType: normalized.routeType,
+    city: cityNameFromQid(payload.city_qid),
+    selectedVariant,
+    routes,
     raw: data,
   };
+
   exportBtn.disabled = false;
   saveBtn.disabled = false;
 
   if (warning) setInfo(warning);
-  renderMap(normalized.pois, normalized.city);
-  renderList(normalized.pois, normalized.city, source, normalized.routeType);
+  if (Array.isArray(data?.warnings) && data.warnings.length) {
+    setInfo(`${warning ? `${warning} · ` : ""}${data.warnings.join(" | ")}`);
+  }
+
+  renderSelectedVariant(source);
   setLoading(false);
 });
 

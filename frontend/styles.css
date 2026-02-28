@@ -337,6 +337,30 @@ fieldset {
   overflow: auto;
 }
 
+.route-variants {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.7rem;
+}
+
+.variant-btn {
+  border: 1px solid #c9d9ee;
+  background: #f4f8ff;
+  color: #183252;
+  border-radius: 999px;
+  padding: 0.28rem 0.7rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.variant-btn.is-active {
+  background: #0a84ff;
+  border-color: #0a84ff;
+  color: #fff;
+}
+
 .poi-item {
   border: 1px solid #d4e1f0;
   border-radius: 12px;
