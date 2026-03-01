@@ -41,7 +41,7 @@
           <div class="section__head">
             <h2>Demo interactiva</h2>
             <p>
-              Configura la recomendación y genera una ruta. Si no hay backend disponible, se usa una respuesta mock.
+              Configura la recomendación y genera una ruta usando el backend real.
             </p>
           </div>
 
@@ -93,11 +93,6 @@
                 <label class="switch">
                   <input id="proximity" type="checkbox" checked />
                   <span>Priorizar cercanía</span>
-                </label>
-
-                <label class="switch">
-                  <input id="strict-real-mode" type="checkbox" />
-                  <span>Modo real (sin mock)</span>
                 </label>
 
                 <div class="field-grid">
@@ -249,7 +244,7 @@
           <div class="faq">
             <details>
               <summary>¿La demo usa datos reales?</summary>
-              <p>Sí, el sistema está preparado para usar datos reales en PostgreSQL; si no hay backend, se muestra un mock.</p>
+              <p>Sí, la demo usa el backend real sobre PostgreSQL y el recomendador del proyecto.</p>
             </details>
             <details>
               <summary>¿Qué ocurre si no pongo punto de inicio?</summary>

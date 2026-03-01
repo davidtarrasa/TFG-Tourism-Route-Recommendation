@@ -22,19 +22,17 @@ Then open:
 
 ## Backend integration
 
-The demo attempts:
-- `POST /recommend`
+The demo uses backend endpoints:
+- `POST /multi-recommend`
+- `POST /saved-routes`
+- `GET /saved-routes`
+- `DELETE /saved-routes`
 
-If backend is not available, it automatically shows a mock response.
+If backend is not available, the UI shows an error (no mock fallback).
 
 ## Pending UX improvements
 
-- Add a map picker modal for start location:
-  - click button next to lat/lon
-  - open mini-map centered on selected city
-  - user clicks a point
-  - lat/lon fields auto-update
-  - modal closes and returns to main form
+- Add optional browser geolocation button ("Use my current position").
 
 ## Files
 

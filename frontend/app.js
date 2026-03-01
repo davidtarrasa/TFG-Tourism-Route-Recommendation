@@ -130,7 +130,6 @@ function buildPayload() {
   const budget = document.getElementById("budget").value;
   const prefs = readPreferences();
   const proximity = document.getElementById("proximity").checked;
-  const strictRealMode = document.getElementById("strict-real-mode").checked;
   const userIdRaw = document.getElementById("user-id").value;
 
   const lat = parseCoord(latInput.value);
@@ -158,68 +157,6 @@ function buildPayload() {
     visits_limit: 120000,
     build_route: false,
     _prefer_location: proximity,
-    _strict_real_mode: strictRealMode,
-  };
-}
-
-function randomBetween(min, max) {
-  return Math.random() * (max - min) + min;
-}
-
-function toKm(a, b) {
-  const R = 6371;
-  const dLat = ((b[0] - a[0]) * Math.PI) / 180;
-  const dLon = ((b[1] - a[1]) * Math.PI) / 180;
-  const lat1 = (a[0] * Math.PI) / 180;
-  const lat2 = (b[0] * Math.PI) / 180;
-  const x =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(x));
-}
-
-function makeMockRoute(payload, type) {
-  const city = CITY_META[payload.city_qid] || CITY_META.Q35765;
-  const center =
-    payload.lat != null && payload.lon != null ? [payload.lat, payload.lon] : city.center;
-  const selectedCats = payload.prefs ? payload.prefs.split(",") : CATEGORY_POOL;
-  const pois = [];
-  let prev = center;
-  for (let i = 0; i < payload.k; i += 1) {
-    const lat = center[0] + randomBetween(-0.03, 0.03);
-    const lon = center[1] + randomBetween(-0.03, 0.03);
-    const point = [lat, lon];
-    const dist = toKm(prev, point);
-    prev = point;
-    pois.push({
-      fsq_id: `mock_${payload.city_qid}_${type}_${i + 1}`,
-      name: `POI ${i + 1} · ${city.name}`,
-      primary_category: selectedCats[i % selectedCats.length] || "Culture",
-      rating: Number(randomBetween(6.4, 9.3).toFixed(2)),
-      distance_km: Number(dist.toFixed(2)),
-      lat,
-      lon,
-    });
-  }
-  return { results: pois };
-}
-
-function makeMockResponse(payload) {
-  return {
-    signals: {
-      history: !!payload.user_id,
-      inputs: !!payload.prefs,
-      location: payload.lat != null && payload.lon != null,
-    },
-    user_exists: !!payload.user_id,
-    omitted: {},
-    warnings: ["mock_response"],
-    routes: {
-      full: makeMockRoute(payload, "full"),
-      history: makeMockRoute(payload, "history"),
-      inputs: makeMockRoute(payload, "inputs"),
-      location: makeMockRoute(payload, "location"),
-    },
   };
 }
 
@@ -230,31 +167,21 @@ function selectPrimaryRoute(routes, preferLocation) {
   return VARIANT_ORDER.find((k) => routes[k]) || keys[0];
 }
 
-async function fetchRecommendation(payload, allowMock = true) {
+async function fetchRecommendation(payload) {
   const api = apiBaseUrl();
   const requestPayload = { ...payload };
   delete requestPayload._prefer_location;
-  delete requestPayload._strict_real_mode;
-  try {
-    const response = await fetch(`${api}/multi-recommend`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(requestPayload),
-    });
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`Backend ${response.status}: ${text}`);
-    }
-    const data = await response.json();
-    return { data, source: "backend", warning: "" };
-  } catch (err) {
-    if (!allowMock) throw err;
-    return {
-      data: makeMockResponse(payload),
-      source: "mock",
-      warning: `Backend no disponible (${err.message}). Mostrando datos mock.`,
-    };
+  const response = await fetch(`${api}/multi-recommend`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(requestPayload),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Backend ${response.status}: ${text}`);
   }
+  const data = await response.json();
+  return { data, source: "backend", warning: "" };
 }
 
 function routeWithOrder(route) {
@@ -616,10 +543,10 @@ form.addEventListener("submit", async (event) => {
   const payload = buildPayload();
   let apiResult;
   try {
-    apiResult = await fetchRecommendation(payload, !payload._strict_real_mode);
+    apiResult = await fetchRecommendation(payload);
   } catch (err) {
     setLoading(false);
-    setError(`Backend no disponible (${err.message}). Estás en modo real: no se usa mock.`);
+    setError(`Backend no disponible (${err.message}).`);
     return;
   }
   const { data, source, warning } = apiResult;
