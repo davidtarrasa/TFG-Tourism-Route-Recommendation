@@ -20,19 +20,32 @@ function apiBaseUrl() {
   return `${protocol}//${hostname}:8000`;
 }
 
+function parseCoord(value) {
+  if (value == null) return null;
+  const s = String(value).trim().replace(",", ".");
+  if (!s) return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+
 let map;
 let markersLayer;
 let routeLayer;
 let currentResult = null;
 
+let mapPicker;
+let mapPickerMarker;
+let pickerLatLon = null;
+
 const form = document.getElementById("recommend-form");
-const stopsInput = document.getElementById("stops");
 const cityInput = document.getElementById("city");
+const stopsInput = document.getElementById("stops");
 const stopsValue = document.getElementById("stops-value");
 const generateBtn = document.getElementById("generate-btn");
 const exportBtn = document.getElementById("export-btn");
 const saveBtn = document.getElementById("save-btn");
 const resetSavedBtn = document.getElementById("reset-saved-btn");
+const refreshSavedBtn = document.getElementById("refresh-saved-btn");
 const errorState = document.getElementById("status-error");
 const infoState = document.getElementById("status-info");
 const loadingState = document.getElementById("status-loading");
@@ -41,8 +54,15 @@ const resultMeta = document.getElementById("result-meta");
 const mapCaption = document.getElementById("map-caption");
 const routeVariants = document.getElementById("route-variants");
 const routeSummary = document.getElementById("route-summary");
+const savedRoutesList = document.getElementById("saved-routes-list");
 const latInput = document.getElementById("lat");
 const lonInput = document.getElementById("lon");
+const openMapPickerBtn = document.getElementById("open-map-picker-btn");
+const closeMapPickerBtn = document.getElementById("close-map-picker-btn");
+const applyMapPickerBtn = document.getElementById("apply-map-picker-btn");
+const mapPickerModal = document.getElementById("map-picker-modal");
+const mapPickerBackdrop = document.getElementById("map-picker-backdrop");
+const mapPickerCaption = document.getElementById("map-picker-caption");
 
 function initMap() {
   map = L.map("map", { zoomControl: true }).setView(CITY_META.Q35765.center, 12);
@@ -79,21 +99,31 @@ function budgetToTier(budget) {
   return 3;
 }
 
+function applyCityCenter(qid, force = true) {
+  const c = CITY_META[qid];
+  if (!c) return;
+  const latStr = Number(c.center[0]).toFixed(4);
+  const lonStr = Number(c.center[1]).toFixed(4);
+  if (force || !latInput.value) latInput.value = latStr;
+  if (force || !lonInput.value) lonInput.value = lonStr;
+
+  if (mapPicker && !mapPickerModal.classList.contains("hidden")) {
+    mapPicker.setView(c.center, 13);
+  }
+}
+
 function buildPayload() {
   const cityQid = cityInput.value;
-  const latRaw = latInput.value;
-  const lonRaw = lonInput.value;
-  const userIdRaw = document.getElementById("user-id").value;
   const budget = document.getElementById("budget").value;
   const prefs = readPreferences();
   const proximity = document.getElementById("proximity").checked;
   const strictRealMode = document.getElementById("strict-real-mode").checked;
+  const userIdRaw = document.getElementById("user-id").value;
 
-  const lat = latRaw ? Number(latRaw) : null;
-  const lon = lonRaw ? Number(lonRaw) : null;
+  const lat = parseCoord(latInput.value);
+  const lon = parseCoord(lonInput.value);
   const userId = userIdRaw ? Number(userIdRaw) : null;
 
-  // Map UI selections into backend prefs string.
   const prefTokens = [...prefs];
   if (budget === "low") prefTokens.push("cheap");
   if (budget === "high") prefTokens.push("expensive");
@@ -114,27 +144,9 @@ function buildPayload() {
     als_path: `src/recommender/cache/als_${cityQid.toLowerCase()}.joblib`,
     visits_limit: 120000,
     build_route: false,
-    // UI-only hint for frontend selection (not sent to backend logic directly).
     _prefer_location: proximity,
     _strict_real_mode: strictRealMode,
   };
-}
-
-function applyCityCenter(qid, force = true) {
-  const c = CITY_META[qid];
-  if (!c) return;
-  const latStr = String(c.center[0]);
-  const lonStr = String(c.center[1]);
-  // Force by default so the user always sees a valid center for the selected city.
-  // If force=false, only fill empty fields.
-  if (force || !latInput.value) latInput.value = latStr;
-  if (force || !lonInput.value) lonInput.value = lonStr;
-
-  // Best-effort for numeric widgets depending on browser/locale.
-  try {
-    if (force || !Number.isFinite(latInput.valueAsNumber)) latInput.valueAsNumber = Number(c.center[0]);
-    if (force || !Number.isFinite(lonInput.valueAsNumber)) lonInput.valueAsNumber = Number(c.center[1]);
-  } catch (_) {}
 }
 
 function randomBetween(min, max) {
@@ -156,7 +168,7 @@ function toKm(a, b) {
 function makeMockRoute(payload, type) {
   const city = CITY_META[payload.city_qid] || CITY_META.Q35765;
   const center =
-    payload.lat && payload.lon ? [payload.lat, payload.lon] : city.center;
+    payload.lat != null && payload.lon != null ? [payload.lat, payload.lon] : city.center;
   const selectedCats = payload.prefs ? payload.prefs.split(",") : CATEGORY_POOL;
   const pois = [];
   let prev = center;
@@ -223,9 +235,7 @@ async function fetchRecommendation(payload, allowMock = true) {
     const data = await response.json();
     return { data, source: "backend", warning: "" };
   } catch (err) {
-    if (!allowMock) {
-      throw err;
-    }
+    if (!allowMock) throw err;
     return {
       data: makeMockResponse(payload),
       source: "mock",
@@ -252,14 +262,9 @@ function renderMap(pois, cityName, variant) {
     .map((p) => [p.lat, p.lon]);
   if (!latlngs.length) return;
 
-  const bounds = L.latLngBounds(latlngs);
-  map.fitBounds(bounds.pad(0.2));
+  map.fitBounds(L.latLngBounds(latlngs).pad(0.2));
 
-  L.polyline(latlngs, {
-    color: "#0a84ff",
-    weight: 5,
-    opacity: 0.9,
-  }).addTo(routeLayer);
+  L.polyline(latlngs, { color: "#0a84ff", weight: 5, opacity: 0.9 }).addTo(routeLayer);
 
   pois.forEach((poi) => {
     if (poi.lat == null || poi.lon == null) return;
@@ -310,10 +315,8 @@ function renderVariants(variants, activeKey, onSelect) {
     routeVariants.classList.add("hidden");
     return;
   }
-
   routeVariants.classList.remove("hidden");
   routeVariants.innerHTML = "";
-
   keys.forEach((key) => {
     const n = (variants[key]?.results || []).length;
     const btn = document.createElement("button");
@@ -332,26 +335,16 @@ function renderVariantSummary(variants, activeKey, onSelect) {
     routeSummary.classList.add("hidden");
     return;
   }
-
   routeSummary.classList.remove("hidden");
   routeSummary.innerHTML = "";
-
   keys.forEach((key) => {
     const rows = variants[key]?.results || [];
     const avgRating = rows.length
-      ? (
-          rows.reduce((acc, r) => acc + (Number(r.rating) || 0), 0) / rows.length
-        ).toFixed(2)
+      ? (rows.reduce((acc, r) => acc + (Number(r.rating) || 0), 0) / rows.length).toFixed(2)
       : "--";
-    const totalDist = rows.reduce(
-      (acc, r) => acc + (Number(r.distance_km) || 0),
-      0
-    );
-
+    const totalDist = rows.reduce((acc, r) => acc + (Number(r.distance_km) || 0), 0);
     const card = document.createElement("article");
-    card.className = `route-summary-card ${
-      key === activeKey ? "is-active" : ""
-    }`;
+    card.className = `route-summary-card ${key === activeKey ? "is-active" : ""}`;
     card.innerHTML = `
       <h5>${VARIANT_LABEL[key] || key}</h5>
       <div class="route-summary-meta">
@@ -366,9 +359,7 @@ function renderVariantSummary(variants, activeKey, onSelect) {
 }
 
 function downloadJSON(obj, filename) {
-  const blob = new Blob([JSON.stringify(obj, null, 2)], {
-    type: "application/json",
-  });
+  const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -377,24 +368,47 @@ function downloadJSON(obj, filename) {
   URL.revokeObjectURL(url);
 }
 
-function saveCurrentResult() {
-  if (!currentResult) return;
-  const key = "tfg_saved_routes";
-  const prev = JSON.parse(localStorage.getItem(key) || "[]");
-  const item = {
-    saved_at: new Date().toISOString(),
-    city: currentResult.city,
-    city_qid: currentResult.cityQid,
-    user_id: currentResult.userId,
-    selectedVariant: currentResult.selectedVariant,
-    payload: currentResult.raw,
-  };
-  prev.push(item);
-  localStorage.setItem(key, JSON.stringify(prev));
-  setInfo(`Ruta guardada en localStorage (${prev.length} guardadas). Guardando también en backend...`);
-  saveCurrentResultToBackend(item).catch((err) => {
-    setInfo(`Guardado local OK. Backend save falló: ${err.message}`);
+function renderSavedRoutes(items, source) {
+  savedRoutesList.innerHTML = "";
+  if (!items.length) {
+    savedRoutesList.innerHTML = `<p class="poi-meta">No hay rutas guardadas (${source}).</p>`;
+    return;
+  }
+  items.forEach((it) => {
+    const routeType = it.route_type || it.selectedVariant || "route";
+    const created = it.created_at || it.saved_at || "";
+    const city = it.city_qid || it.city || "n/a";
+    const user = it.user_id ?? "anon";
+    const row = document.createElement("article");
+    row.className = "saved-item";
+    row.innerHTML = `
+      <h5>${routeType} · ${city}</h5>
+      <p>user: ${user} · ${String(created).replace("T", " ").slice(0, 19)} · fuente: ${source}</p>
+    `;
+    savedRoutesList.appendChild(row);
   });
+}
+
+async function loadSavedRoutes() {
+  const cityQid = cityInput.value || "";
+  const userIdRaw = document.getElementById("user-id").value;
+  const userId = userIdRaw ? Number(userIdRaw) : null;
+  const api = apiBaseUrl();
+  const query = new URLSearchParams();
+  query.set("limit", "30");
+  if (cityQid) query.set("city_qid", cityQid);
+  if (userId != null) query.set("user_id", String(userId));
+  try {
+    const response = await fetch(`${api}/saved-routes?${query.toString()}`);
+    if (response.ok) {
+      const data = await response.json();
+      renderSavedRoutes(data.items || [], "backend");
+      return;
+    }
+  } catch (_) {}
+  const local = JSON.parse(localStorage.getItem("tfg_saved_routes") || "[]");
+  const filtered = local.filter((x) => (!cityQid || x.city_qid === cityQid) && (userId == null || x.user_id === userId));
+  renderSavedRoutes(filtered.slice().reverse().slice(0, 30), "local");
 }
 
 async function saveCurrentResultToBackend(item) {
@@ -424,15 +438,34 @@ async function saveCurrentResultToBackend(item) {
   }
   const data = await response.json();
   setInfo(`Ruta guardada en localStorage + backend (id ${data.id}).`);
+  await loadSavedRoutes();
+}
+
+function saveCurrentResult() {
+  if (!currentResult) return;
+  const key = "tfg_saved_routes";
+  const prev = JSON.parse(localStorage.getItem(key) || "[]");
+  const item = {
+    saved_at: new Date().toISOString(),
+    city: currentResult.city,
+    city_qid: currentResult.cityQid,
+    user_id: currentResult.userId,
+    selectedVariant: currentResult.selectedVariant,
+    payload: currentResult.raw,
+  };
+  prev.push(item);
+  localStorage.setItem(key, JSON.stringify(prev));
+  setInfo(`Ruta guardada en localStorage (${prev.length} guardadas). Guardando también en backend...`);
+  saveCurrentResultToBackend(item).catch((err) => {
+    setInfo(`Guardado local OK. Backend save falló: ${err.message}`);
+  });
 }
 
 async function resetSavedRoutes() {
-  const ok = window.confirm(
-    "¿Borrar rutas guardadas? Se limpiará localStorage y backend (si está disponible)."
-  );
+  const ok = window.confirm("¿Borrar rutas guardadas? Se limpiará localStorage y backend (si está disponible).");
   if (!ok) return;
-
   localStorage.removeItem("tfg_saved_routes");
+
   const cityQid = cityInput.value || null;
   const userIdRaw = document.getElementById("user-id").value;
   const userId = userIdRaw ? Number(userIdRaw) : null;
@@ -455,6 +488,7 @@ async function resetSavedRoutes() {
   } else {
     setInfo(`LocalStorage reseteado y backend limpiado (${deleted} registros).`);
   }
+  await loadSavedRoutes();
 }
 
 function cityNameFromQid(qid) {
@@ -478,8 +512,70 @@ function renderSelectedVariant(source) {
   });
 }
 
+function openMapPicker() {
+  const city = CITY_META[cityInput.value] || CITY_META.Q35765;
+  mapPickerModal.classList.remove("hidden");
+  mapPickerModal.setAttribute("aria-hidden", "false");
+
+  if (!mapPicker) {
+    mapPicker = L.map("map-picker", { zoomControl: true }).setView(city.center, 13);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap contributors",
+    }).addTo(mapPicker);
+    mapPicker.on("click", (e) => {
+      pickerLatLon = [e.latlng.lat, e.latlng.lng];
+      if (!mapPickerMarker) {
+        mapPickerMarker = L.marker([e.latlng.lat, e.latlng.lng]).addTo(mapPicker);
+      } else {
+        mapPickerMarker.setLatLng([e.latlng.lat, e.latlng.lng]);
+      }
+      mapPickerCaption.textContent = `Seleccionado: ${e.latlng.lat.toFixed(6)}, ${e.latlng.lng.toFixed(6)}`;
+    });
+  }
+
+  mapPicker.setView(city.center, 13);
+  const lat = parseCoord(latInput.value);
+  const lon = parseCoord(lonInput.value);
+  if (lat != null && lon != null) {
+    pickerLatLon = [lat, lon];
+    if (!mapPickerMarker) mapPickerMarker = L.marker([lat, lon]).addTo(mapPicker);
+    else mapPickerMarker.setLatLng([lat, lon]);
+    mapPickerCaption.textContent = `Seleccionado: ${lat.toFixed(6)}, ${lon.toFixed(6)}`;
+  }
+  setTimeout(() => mapPicker.invalidateSize(), 30);
+}
+
+function closeMapPicker() {
+  mapPickerModal.classList.add("hidden");
+  mapPickerModal.setAttribute("aria-hidden", "true");
+}
+
+function applyMapPickerSelection() {
+  if (pickerLatLon) {
+    latInput.value = pickerLatLon[0].toFixed(6);
+    lonInput.value = pickerLatLon[1].toFixed(6);
+  }
+  closeMapPicker();
+}
+
 stopsInput.addEventListener("input", () => {
   stopsValue.textContent = stopsInput.value;
+});
+
+cityInput.addEventListener("change", () => {
+  applyCityCenter(cityInput.value, true);
+  loadSavedRoutes().catch(() => {});
+});
+cityInput.addEventListener("input", () => applyCityCenter(cityInput.value, true));
+
+openMapPickerBtn.addEventListener("click", openMapPicker);
+closeMapPickerBtn.addEventListener("click", closeMapPicker);
+mapPickerBackdrop.addEventListener("click", closeMapPicker);
+applyMapPickerBtn.addEventListener("click", applyMapPickerSelection);
+
+refreshSavedBtn.addEventListener("click", () => {
+  loadSavedRoutes().catch((err) => setError(`No se pudieron cargar rutas guardadas: ${err.message}`));
 });
 
 exportBtn.addEventListener("click", () => {
@@ -492,9 +588,6 @@ saveBtn.addEventListener("click", saveCurrentResult);
 resetSavedBtn.addEventListener("click", () => {
   resetSavedRoutes().catch((err) => setError(`Reset falló: ${err.message}`));
 });
-const syncCityCenter = () => applyCityCenter(cityInput.value, true);
-cityInput.addEventListener("change", syncCityCenter);
-cityInput.addEventListener("input", syncCityCenter);
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -514,7 +607,6 @@ form.addEventListener("submit", async (event) => {
   const { data, source, warning } = apiResult;
   const routes = data?.routes || {};
   const selectedVariant = selectPrimaryRoute(routes, payload._prefer_location);
-
   if (!selectedVariant) {
     setLoading(false);
     setError("No se han generado rutas para esta petición.");
@@ -543,8 +635,7 @@ form.addEventListener("submit", async (event) => {
 });
 
 initMap();
-// Initial fill.
 applyCityCenter(cityInput.value, true);
-// Some browsers restore form state after script execution; re-apply on next tick and on page show.
 setTimeout(() => applyCityCenter(cityInput.value, true), 0);
 window.addEventListener("pageshow", () => applyCityCenter(cityInput.value, true));
+loadSavedRoutes().catch(() => {});

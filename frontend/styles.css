@@ -311,6 +311,12 @@ fieldset {
   padding: 0.85rem;
 }
 
+.card--sub {
+  margin-top: 0.85rem;
+  border-radius: 12px;
+  box-shadow: none;
+}
+
 .card__header {
   display: flex;
   align-items: baseline;
@@ -399,6 +405,74 @@ fieldset {
   border-radius: 12px;
   padding: 0.6rem 0.7rem;
   background: #f9fcff;
+}
+
+.saved-routes-list {
+  display: grid;
+  gap: 0.45rem;
+  max-height: 220px;
+  overflow: auto;
+  margin-top: 0.6rem;
+}
+
+.saved-item {
+  border: 1px solid #d4e1f0;
+  border-radius: 10px;
+  background: #f9fcff;
+  padding: 0.5rem 0.6rem;
+}
+
+.saved-item h5 {
+  margin: 0 0 0.2rem;
+  font-size: 0.86rem;
+}
+
+.saved-item p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+}
+
+.modal__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 22, 40, 0.42);
+}
+
+.modal__dialog {
+  position: relative;
+  width: min(840px, 92vw);
+  background: #fff;
+  border: 1px solid #d9e6f5;
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  padding: 0.8rem;
+}
+
+#map-picker-caption {
+  display: block;
+  color: var(--muted);
+  margin: 0.2rem 0 0.55rem;
+}
+
+.map-picker {
+  height: 360px;
+  border: 1px solid #cfddee;
+  border-radius: 12px;
+}
+
+.modal__actions {
+  margin-top: 0.65rem;
+  display: flex;
+  justify-content: flex-end;
 }
 
 .poi-item h4 {

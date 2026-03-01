@@ -15,6 +15,7 @@ import json
 import numpy as np
 import pandas as pd
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from .multi_route_service import build_multi_routes
@@ -121,6 +122,13 @@ def _route_payload(
 
 
 app = FastAPI(title="Tourism Route Recommender API", version="0.1.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 def _ensure_saved_routes_table(dsn: Optional[str] = None) -> None:

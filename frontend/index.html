@@ -96,13 +96,16 @@
                 <div class="field-grid">
                   <label class="field">
                     <span>Latitud (opcional)</span>
-                    <input id="lat" type="number" step="any" value="34.6937" placeholder="34.6937" />
+                    <input id="lat" type="text" value="34.6937" placeholder="34.6937" />
                   </label>
                   <label class="field">
                     <span>Longitud (opcional)</span>
-                    <input id="lon" type="number" step="any" value="135.5023" placeholder="135.5023" />
+                    <input id="lon" type="text" value="135.5023" placeholder="135.5023" />
                   </label>
                 </div>
+                <button id="open-map-picker-btn" class="btn btn--ghost" type="button">
+                  Elegir ubicación en mapa
+                </button>
 
                 <label class="field">
                   <span>User ID (opcional)</span>
@@ -150,6 +153,13 @@
                 <div id="route-variants" class="route-variants hidden"></div>
                 <div id="route-summary" class="route-summary hidden"></div>
                 <div id="poi-list" class="poi-list"></div>
+                <div class="saved-routes card card--sub">
+                  <div class="card__header">
+                    <h3>Rutas guardadas</h3>
+                    <button id="refresh-saved-btn" class="btn btn--ghost" type="button">Refrescar</button>
+                  </div>
+                  <div id="saved-routes-list" class="saved-routes-list"></div>
+                </div>
               </div>
             </div>
           </div>
@@ -258,6 +268,21 @@
         </nav>
       </div>
     </footer>
+
+    <div id="map-picker-modal" class="modal hidden" aria-hidden="true">
+      <div class="modal__backdrop" id="map-picker-backdrop"></div>
+      <div class="modal__dialog">
+        <div class="card__header">
+          <h3>Seleccionar ubicación inicial</h3>
+          <button id="close-map-picker-btn" class="btn btn--ghost" type="button">Cerrar</button>
+        </div>
+        <small id="map-picker-caption">Haz clic en el mapa para fijar lat/lon.</small>
+        <div id="map-picker" class="map-picker"></div>
+        <div class="modal__actions">
+          <button id="apply-map-picker-btn" class="btn btn--primary" type="button">Usar esta ubicación</button>
+        </div>
+      </div>
+    </div>
 
     <script
       src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
