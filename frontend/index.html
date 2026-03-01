@@ -66,11 +66,18 @@
                 <fieldset class="field">
                   <legend>Preferencias</legend>
                   <div class="checks">
-                    <label><input type="checkbox" value="Food" />Food</label>
-                    <label><input type="checkbox" value="Culture" />Culture</label>
-                    <label><input type="checkbox" value="Nature" />Nature</label>
-                    <label><input type="checkbox" value="Nightlife" />Nightlife</label>
-                    <label><input type="checkbox" value="Shopping" />Shopping</label>
+                    <label><input type="checkbox" value="food" />Food</label>
+                    <label><input type="checkbox" value="culture" />Culture</label>
+                    <label><input type="checkbox" value="nature" />Nature</label>
+                    <label><input type="checkbox" value="nightlife" />Nightlife</label>
+                    <label><input type="checkbox" value="shopping" />Shopping</label>
+                    <label><input type="checkbox" value="service" />Service</label>
+                    <label><input type="checkbox" value="health" />Health</label>
+                    <label><input type="checkbox" value="entertainment" />Entertainment</label>
+                    <label><input type="checkbox" value="transport" />Transport</label>
+                    <label><input type="checkbox" value="relaxation" />Relaxation</label>
+                    <label><input type="checkbox" value="family" />Family</label>
+                    <label><input type="checkbox" value="sports" />Sports</label>
                   </div>
                 </fieldset>
 
@@ -103,7 +110,7 @@
                     <input id="lon" type="text" value="135.5023" placeholder="135.5023" />
                   </label>
                 </div>
-                <button id="open-map-picker-btn" class="btn btn--ghost" type="button">
+                <button id="open-map-picker-btn" class="btn btn--ghost" type="button" onclick="window.openMapPickerUI && window.openMapPickerUI()">
                   Elegir ubicación en mapa
                 </button>
 

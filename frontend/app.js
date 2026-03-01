@@ -4,7 +4,20 @@ const CITY_META = {
   Q864965: { name: "Petaling Jaya", center: [3.1073, 101.6067] },
 };
 
-const CATEGORY_POOL = ["Food", "Culture", "Nature", "Nightlife", "Shopping"];
+const CATEGORY_POOL = [
+  "food",
+  "culture",
+  "nature",
+  "nightlife",
+  "shopping",
+  "service",
+  "health",
+  "entertainment",
+  "transport",
+  "relaxation",
+  "family",
+  "sports",
+];
 const VARIANT_ORDER = ["full", "history", "inputs", "location"];
 const VARIANT_LABEL = {
   full: "Full",
@@ -513,6 +526,10 @@ function renderSelectedVariant(source) {
 }
 
 function openMapPicker() {
+  if (!mapPickerModal) {
+    setError("No se encontró el modal de mapa en el DOM.");
+    return;
+  }
   const city = CITY_META[cityInput.value] || CITY_META.Q35765;
   mapPickerModal.classList.remove("hidden");
   mapPickerModal.setAttribute("aria-hidden", "false");
@@ -569,10 +586,11 @@ cityInput.addEventListener("change", () => {
 });
 cityInput.addEventListener("input", () => applyCityCenter(cityInput.value, true));
 
-openMapPickerBtn.addEventListener("click", openMapPicker);
-closeMapPickerBtn.addEventListener("click", closeMapPicker);
-mapPickerBackdrop.addEventListener("click", closeMapPicker);
-applyMapPickerBtn.addEventListener("click", applyMapPickerSelection);
+if (openMapPickerBtn) openMapPickerBtn.addEventListener("click", openMapPicker);
+if (closeMapPickerBtn) closeMapPickerBtn.addEventListener("click", closeMapPicker);
+if (mapPickerBackdrop) mapPickerBackdrop.addEventListener("click", closeMapPicker);
+if (applyMapPickerBtn) applyMapPickerBtn.addEventListener("click", applyMapPickerSelection);
+window.openMapPickerUI = openMapPicker;
 
 refreshSavedBtn.addEventListener("click", () => {
   loadSavedRoutes().catch((err) => setError(`No se pudieron cargar rutas guardadas: ${err.message}`));
