@@ -88,14 +88,19 @@
                   <span>Priorizar cercanía</span>
                 </label>
 
+                <label class="switch">
+                  <input id="strict-real-mode" type="checkbox" />
+                  <span>Modo real (sin mock)</span>
+                </label>
+
                 <div class="field-grid">
                   <label class="field">
                     <span>Latitud (opcional)</span>
-                    <input id="lat" type="number" step="any" placeholder="34.6937" />
+                    <input id="lat" type="number" step="any" value="34.6937" placeholder="34.6937" />
                   </label>
                   <label class="field">
                     <span>Longitud (opcional)</span>
-                    <input id="lon" type="number" step="any" placeholder="135.5023" />
+                    <input id="lon" type="number" step="any" value="135.5023" placeholder="135.5023" />
                   </label>
                 </div>
 
@@ -113,6 +118,9 @@
                   </button>
                   <button id="save-btn" class="btn btn--ghost" type="button" disabled>
                     Guardar
+                  </button>
+                  <button id="reset-saved-btn" class="btn btn--ghost" type="button">
+                    Reset guardados
                   </button>
                 </div>
               </form>

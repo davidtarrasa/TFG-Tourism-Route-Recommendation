@@ -10,6 +10,7 @@ Endpoints:
 from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional
+import json
 
 import numpy as np
 import pandas as pd
@@ -122,6 +123,49 @@ def _route_payload(
 app = FastAPI(title="Tourism Route Recommender API", version="0.1.0")
 
 
+def _ensure_saved_routes_table(dsn: Optional[str] = None) -> None:
+    conn = get_conn(dsn)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS saved_routes (
+                    id BIGSERIAL PRIMARY KEY,
+                    user_id BIGINT,
+                    city_qid TEXT,
+                    route_type TEXT NOT NULL,
+                    source TEXT NOT NULL DEFAULT 'frontend',
+                    payload JSONB NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                """
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_saved_routes_user_created ON saved_routes(user_id, created_at DESC);"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_saved_routes_city_created ON saved_routes(city_qid, created_at DESC);"
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+class SaveRouteRequest(BaseModel):
+    dsn: Optional[str] = None
+    user_id: Optional[int] = None
+    city_qid: Optional[str] = None
+    route_type: str
+    source: str = "frontend"
+    payload: Dict[str, Any]
+
+
+class DeleteSavedRoutesRequest(BaseModel):
+    dsn: Optional[str] = None
+    user_id: Optional[int] = None
+    city_qid: Optional[str] = None
+
+
 @app.get("/health")
 def health() -> Dict[str, str]:
     return {"status": "ok"}
@@ -217,3 +261,97 @@ def multi_recommend_endpoint(req: MultiRecommendRequest) -> Dict[str, Any]:
         "warnings": res.warnings,
     }
 
+
+@app.post("/saved-routes")
+def save_route_endpoint(req: SaveRouteRequest) -> Dict[str, Any]:
+    try:
+        _ensure_saved_routes_table(req.dsn)
+        conn = get_conn(req.dsn)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO saved_routes (user_id, city_qid, route_type, source, payload)
+                    VALUES (%(user_id)s, %(city_qid)s, %(route_type)s, %(source)s, %(payload)s::jsonb)
+                    RETURNING id, created_at
+                    """,
+                    {
+                        "user_id": req.user_id,
+                        "city_qid": req.city_qid,
+                        "route_type": req.route_type,
+                        "source": req.source,
+                        "payload": json.dumps(req.payload, ensure_ascii=False),
+                    },
+                )
+                row = cur.fetchone()
+            conn.commit()
+        finally:
+            conn.close()
+        return {"status": "ok", "id": int(row[0]), "created_at": str(row[1])}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"save_route_failed: {exc}") from exc
+
+
+@app.get("/saved-routes")
+def list_saved_routes(
+    dsn: Optional[str] = None,
+    user_id: Optional[int] = None,
+    city_qid: Optional[str] = None,
+    limit: int = 50,
+) -> Dict[str, Any]:
+    if limit < 1:
+        limit = 1
+    if limit > 1000:
+        limit = 1000
+    try:
+        _ensure_saved_routes_table(dsn)
+        conn = get_conn(dsn)
+        try:
+            clauses = []
+            params: Dict[str, Any] = {"limit": int(limit)}
+            if user_id is not None:
+                clauses.append("user_id = %(user_id)s")
+                params["user_id"] = int(user_id)
+            if city_qid is not None:
+                clauses.append("city_qid = %(city_qid)s")
+                params["city_qid"] = city_qid
+            q = "SELECT id, user_id, city_qid, route_type, source, payload, created_at FROM saved_routes"
+            if clauses:
+                q += " WHERE " + " AND ".join(clauses)
+            q += " ORDER BY created_at DESC LIMIT %(limit)s"
+            df = pd.read_sql(q, conn, params=params)
+        finally:
+            conn.close()
+        return {"status": "ok", "count": int(len(df)), "items": _df_to_records(df)}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"list_saved_routes_failed: {exc}") from exc
+
+
+@app.delete("/saved-routes")
+def delete_saved_routes(req: DeleteSavedRoutesRequest) -> Dict[str, Any]:
+    try:
+        _ensure_saved_routes_table(req.dsn)
+        conn = get_conn(req.dsn)
+        try:
+            clauses = []
+            params: Dict[str, Any] = {}
+            if req.user_id is not None:
+                clauses.append("user_id = %(user_id)s")
+                params["user_id"] = int(req.user_id)
+            if req.city_qid is not None:
+                clauses.append("city_qid = %(city_qid)s")
+                params["city_qid"] = req.city_qid
+
+            q = "DELETE FROM saved_routes"
+            if clauses:
+                q += " WHERE " + " AND ".join(clauses)
+            q += " RETURNING id"
+            with conn.cursor() as cur:
+                cur.execute(q, params)
+                deleted = cur.fetchall()
+            conn.commit()
+        finally:
+            conn.close()
+        return {"status": "ok", "deleted": len(deleted)}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"delete_saved_routes_failed: {exc}") from exc

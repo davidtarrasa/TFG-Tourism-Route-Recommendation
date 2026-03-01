@@ -27,10 +27,12 @@ let currentResult = null;
 
 const form = document.getElementById("recommend-form");
 const stopsInput = document.getElementById("stops");
+const cityInput = document.getElementById("city");
 const stopsValue = document.getElementById("stops-value");
 const generateBtn = document.getElementById("generate-btn");
 const exportBtn = document.getElementById("export-btn");
 const saveBtn = document.getElementById("save-btn");
+const resetSavedBtn = document.getElementById("reset-saved-btn");
 const errorState = document.getElementById("status-error");
 const infoState = document.getElementById("status-info");
 const loadingState = document.getElementById("status-loading");
@@ -39,6 +41,8 @@ const resultMeta = document.getElementById("result-meta");
 const mapCaption = document.getElementById("map-caption");
 const routeVariants = document.getElementById("route-variants");
 const routeSummary = document.getElementById("route-summary");
+const latInput = document.getElementById("lat");
+const lonInput = document.getElementById("lon");
 
 function initMap() {
   map = L.map("map", { zoomControl: true }).setView(CITY_META.Q35765.center, 12);
@@ -76,13 +80,14 @@ function budgetToTier(budget) {
 }
 
 function buildPayload() {
-  const cityQid = document.getElementById("city").value;
-  const latRaw = document.getElementById("lat").value;
-  const lonRaw = document.getElementById("lon").value;
+  const cityQid = cityInput.value;
+  const latRaw = latInput.value;
+  const lonRaw = lonInput.value;
   const userIdRaw = document.getElementById("user-id").value;
   const budget = document.getElementById("budget").value;
   const prefs = readPreferences();
   const proximity = document.getElementById("proximity").checked;
+  const strictRealMode = document.getElementById("strict-real-mode").checked;
 
   const lat = latRaw ? Number(latRaw) : null;
   const lon = lonRaw ? Number(lonRaw) : null;
@@ -111,7 +116,25 @@ function buildPayload() {
     build_route: false,
     // UI-only hint for frontend selection (not sent to backend logic directly).
     _prefer_location: proximity,
+    _strict_real_mode: strictRealMode,
   };
+}
+
+function applyCityCenter(qid, force = true) {
+  const c = CITY_META[qid];
+  if (!c) return;
+  const latStr = String(c.center[0]);
+  const lonStr = String(c.center[1]);
+  // Force by default so the user always sees a valid center for the selected city.
+  // If force=false, only fill empty fields.
+  if (force || !latInput.value) latInput.value = latStr;
+  if (force || !lonInput.value) lonInput.value = lonStr;
+
+  // Best-effort for numeric widgets depending on browser/locale.
+  try {
+    if (force || !Number.isFinite(latInput.valueAsNumber)) latInput.valueAsNumber = Number(c.center[0]);
+    if (force || !Number.isFinite(lonInput.valueAsNumber)) lonInput.valueAsNumber = Number(c.center[1]);
+  } catch (_) {}
 }
 
 function randomBetween(min, max) {
@@ -182,10 +205,11 @@ function selectPrimaryRoute(routes, preferLocation) {
   return VARIANT_ORDER.find((k) => routes[k]) || keys[0];
 }
 
-async function fetchRecommendation(payload) {
+async function fetchRecommendation(payload, allowMock = true) {
   const api = apiBaseUrl();
   const requestPayload = { ...payload };
   delete requestPayload._prefer_location;
+  delete requestPayload._strict_real_mode;
   try {
     const response = await fetch(`${api}/multi-recommend`, {
       method: "POST",
@@ -199,6 +223,9 @@ async function fetchRecommendation(payload) {
     const data = await response.json();
     return { data, source: "backend", warning: "" };
   } catch (err) {
+    if (!allowMock) {
+      throw err;
+    }
     return {
       data: makeMockResponse(payload),
       source: "mock",
@@ -354,14 +381,80 @@ function saveCurrentResult() {
   if (!currentResult) return;
   const key = "tfg_saved_routes";
   const prev = JSON.parse(localStorage.getItem(key) || "[]");
-  prev.push({
+  const item = {
     saved_at: new Date().toISOString(),
     city: currentResult.city,
+    city_qid: currentResult.cityQid,
+    user_id: currentResult.userId,
     selectedVariant: currentResult.selectedVariant,
     payload: currentResult.raw,
-  });
+  };
+  prev.push(item);
   localStorage.setItem(key, JSON.stringify(prev));
-  setInfo(`Ruta guardada en localStorage (${prev.length} guardadas).`);
+  setInfo(`Ruta guardada en localStorage (${prev.length} guardadas). Guardando también en backend...`);
+  saveCurrentResultToBackend(item).catch((err) => {
+    setInfo(`Guardado local OK. Backend save falló: ${err.message}`);
+  });
+}
+
+async function saveCurrentResultToBackend(item) {
+  const api = apiBaseUrl();
+  const routePayload = currentResult?.routes?.[currentResult.selectedVariant] || {};
+  const body = {
+    user_id: item.user_id ?? null,
+    city_qid: item.city_qid ?? null,
+    route_type: item.selectedVariant,
+    source: "frontend",
+    payload: {
+      city: item.city,
+      selectedVariant: item.selectedVariant,
+      route: routePayload,
+      full_response: item.payload,
+      saved_at: item.saved_at,
+    },
+  };
+  const response = await fetch(`${api}/saved-routes`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Backend ${response.status}: ${text}`);
+  }
+  const data = await response.json();
+  setInfo(`Ruta guardada en localStorage + backend (id ${data.id}).`);
+}
+
+async function resetSavedRoutes() {
+  const ok = window.confirm(
+    "¿Borrar rutas guardadas? Se limpiará localStorage y backend (si está disponible)."
+  );
+  if (!ok) return;
+
+  localStorage.removeItem("tfg_saved_routes");
+  const cityQid = cityInput.value || null;
+  const userIdRaw = document.getElementById("user-id").value;
+  const userId = userIdRaw ? Number(userIdRaw) : null;
+  const api = apiBaseUrl();
+  let deleted = null;
+  try {
+    const response = await fetch(`${api}/saved-routes`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: userId, city_qid: cityQid }),
+    });
+    if (response.ok) {
+      const data = await response.json();
+      deleted = data.deleted;
+    }
+  } catch (_) {}
+
+  if (deleted == null) {
+    setInfo("LocalStorage reseteado. Backend no disponible o sin borrar.");
+  } else {
+    setInfo(`LocalStorage reseteado y backend limpiado (${deleted} registros).`);
+  }
 }
 
 function cityNameFromQid(qid) {
@@ -396,6 +489,12 @@ exportBtn.addEventListener("click", () => {
 });
 
 saveBtn.addEventListener("click", saveCurrentResult);
+resetSavedBtn.addEventListener("click", () => {
+  resetSavedRoutes().catch((err) => setError(`Reset falló: ${err.message}`));
+});
+const syncCityCenter = () => applyCityCenter(cityInput.value, true);
+cityInput.addEventListener("change", syncCityCenter);
+cityInput.addEventListener("input", syncCityCenter);
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -404,7 +503,15 @@ form.addEventListener("submit", async (event) => {
   setInfo("");
 
   const payload = buildPayload();
-  const { data, source, warning } = await fetchRecommendation(payload);
+  let apiResult;
+  try {
+    apiResult = await fetchRecommendation(payload, !payload._strict_real_mode);
+  } catch (err) {
+    setLoading(false);
+    setError(`Backend no disponible (${err.message}). Estás en modo real: no se usa mock.`);
+    return;
+  }
+  const { data, source, warning } = apiResult;
   const routes = data?.routes || {};
   const selectedVariant = selectPrimaryRoute(routes, payload._prefer_location);
 
@@ -416,6 +523,8 @@ form.addEventListener("submit", async (event) => {
 
   currentResult = {
     city: cityNameFromQid(payload.city_qid),
+    cityQid: payload.city_qid,
+    userId: payload.user_id ?? null,
     selectedVariant,
     routes,
     raw: data,
@@ -434,3 +543,8 @@ form.addEventListener("submit", async (event) => {
 });
 
 initMap();
+// Initial fill.
+applyCityCenter(cityInput.value, true);
+// Some browsers restore form state after script execution; re-apply on next tick and on page show.
+setTimeout(() => applyCityCenter(cityInput.value, true), 0);
+window.addEventListener("pageshow", () => applyCityCenter(cityInput.value, true));
