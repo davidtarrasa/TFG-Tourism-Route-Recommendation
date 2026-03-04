@@ -317,6 +317,15 @@ fieldset {
   box-shadow: none;
 }
 
+.section--saved {
+  padding-top: 0.6rem;
+  padding-bottom: 2.2rem;
+}
+
+.section--saved .saved-routes {
+  padding: 0.95rem;
+}
+
 .card__header {
   display: flex;
   align-items: baseline;

@@ -154,7 +154,8 @@ function buildPayload() {
     embeddings_path: `src/recommender/cache/word2vec_${cityQid.toLowerCase()}.joblib`,
     use_als: true,
     als_path: `src/recommender/cache/als_${cityQid.toLowerCase()}.joblib`,
-    visits_limit: 120000,
+    // Interactive UI should use a lower limit than offline eval to keep response time acceptable.
+    visits_limit: 10000,
     build_route: false,
     _prefer_location: proximity,
   };
@@ -546,7 +547,10 @@ form.addEventListener("submit", async (event) => {
     apiResult = await fetchRecommendation(payload);
   } catch (err) {
     setLoading(false);
-    setError(`Backend no disponible (${err.message}).`);
+    const msg = err && err.name === "AbortError"
+      ? "Tiempo de espera agotado (UI timeout). Prueba con menos paradas o vuelve a intentar."
+      : `Backend no disponible (${err.message}).`;
+    setError(msg);
     return;
   }
   const { data, source, warning } = apiResult;

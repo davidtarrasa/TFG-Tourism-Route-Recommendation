@@ -16,7 +16,7 @@
       integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
       crossorigin=""
     />
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=20260304a" />
   </head>
   <body>
     <header class="hero" id="top">
@@ -155,15 +155,20 @@
                 <div id="route-variants" class="route-variants hidden"></div>
                 <div id="route-summary" class="route-summary hidden"></div>
                 <div id="poi-list" class="poi-list"></div>
-                <div class="saved-routes card card--sub">
-                  <div class="card__header">
-                    <h3>Rutas guardadas</h3>
-                    <button id="refresh-saved-btn" class="btn btn--ghost" type="button">Refrescar</button>
-                  </div>
-                  <div id="saved-routes-list" class="saved-routes-list"></div>
-                </div>
               </div>
             </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section section--saved" id="saved">
+        <div class="container">
+          <div class="saved-routes card">
+            <div class="card__header">
+              <h3>Rutas guardadas</h3>
+              <button id="refresh-saved-btn" class="btn btn--ghost" type="button">Refrescar</button>
+            </div>
+            <div id="saved-routes-list" class="saved-routes-list"></div>
           </div>
         </div>
       </section>
@@ -291,6 +296,6 @@
       integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
       crossorigin=""
     ></script>
-    <script src="./app.js"></script>
+    <script src="./app.js?v=20260304a"></script>
   </body>
 </html>
