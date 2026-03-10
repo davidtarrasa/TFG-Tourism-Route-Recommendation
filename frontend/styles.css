@@ -331,6 +331,7 @@ fieldset {
   align-items: baseline;
   justify-content: space-between;
   gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 .card__header small {
@@ -342,6 +343,90 @@ fieldset {
   margin-top: 0.7rem;
   border: 1px solid #cfddee;
   border-radius: 12px;
+}
+
+.map-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.map-tools select {
+  width: auto;
+  min-width: 96px;
+  padding: 0.4rem 0.55rem;
+  font-size: 0.82rem;
+}
+
+#map-fullscreen-btn {
+  padding: 0.38rem 0.6rem;
+  border-radius: 10px;
+  min-width: 40px;
+}
+
+.route-legend {
+  margin-top: 0.6rem;
+  display: grid;
+  gap: 0.3rem;
+  border: 1px solid #d7e3f2;
+  border-radius: 10px;
+  padding: 0.5rem 0.6rem;
+  background: #f9fcff;
+  font-size: 0.8rem;
+}
+
+.route-legend-title {
+  font-weight: 700;
+  color: #1f3452;
+}
+
+.route-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: #36506f;
+  cursor: pointer;
+}
+
+.route-legend-color {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  border: 1px solid #203a57;
+  flex: 0 0 14px;
+}
+
+.route-legend-check {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: #0a84ff;
+}
+
+#map-card:fullscreen,
+#map-card:-webkit-full-screen {
+  width: 100vw;
+  height: 100vh;
+  max-width: none;
+  border-radius: 0;
+  margin: 0;
+  padding: 0.7rem;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+}
+
+#map-card:fullscreen #map,
+#map-card:-webkit-full-screen #map {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+}
+
+#map-card:fullscreen .route-legend,
+#map-card:-webkit-full-screen .route-legend {
+  max-height: 28vh;
+  overflow: auto;
 }
 
 .poi-list {

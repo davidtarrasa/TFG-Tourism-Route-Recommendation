@@ -39,6 +39,11 @@ let markersLayer;
 let routeLayer;
 let currentResult = null;
 let mapRenderSeq = 0;
+let segmentLayers = { straight: [], road: [], visible: [] };
+let satelliteLayer;
+let lightLayer;
+let osmLayer;
+let currentBaseLayer;
 let mapPicker;
 let mapPickerMarker;
 let pickerLatLon = null;
@@ -58,6 +63,10 @@ const loadingState = document.getElementById("status-loading");
 const poiList = document.getElementById("poi-list");
 const resultMeta = document.getElementById("result-meta");
 const mapCaption = document.getElementById("map-caption");
+const mapCard = document.getElementById("map-card");
+const mapStyleSelect = document.getElementById("map-style");
+const mapFullscreenBtn = document.getElementById("map-fullscreen-btn");
+const routeLegend = document.getElementById("route-legend");
 const routeVariants = document.getElementById("route-variants");
 const routeSummary = document.getElementById("route-summary");
 const savedRoutesList = document.getElementById("saved-routes-list");
@@ -72,12 +81,31 @@ const mapPickerCaption = document.getElementById("map-picker-caption");
 
 function initMap() {
   map = L.map("map", { zoomControl: true }).setView(CITY_META.Q35765.center, 12);
-  L.tileLayer(
+  satelliteLayer = L.tileLayer(
     "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
     { maxZoom: 19, attribution: "Esri" }
-  ).addTo(map);
+  );
+  lightLayer = L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
+    maxZoom: 20,
+    attribution: "&copy; OpenStreetMap contributors &copy; CARTO",
+  });
+  osmLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: "&copy; OpenStreetMap contributors",
+  });
+  currentBaseLayer = satelliteLayer;
+  currentBaseLayer.addTo(map);
   markersLayer = L.layerGroup().addTo(map);
   routeLayer = L.layerGroup().addTo(map);
+}
+
+function setBaseLayer(style) {
+  const wanted =
+    style === "light" ? lightLayer : style === "osm" ? osmLayer : satelliteLayer;
+  if (!wanted || !map) return;
+  if (currentBaseLayer && map.hasLayer(currentBaseLayer)) map.removeLayer(currentBaseLayer);
+  wanted.addTo(map);
+  currentBaseLayer = wanted;
 }
 
 function setLoading(isLoading) {
@@ -203,6 +231,20 @@ function routeTotalKm(route, pois) {
   return total;
 }
 
+function segmentColorBlue(idx, total) {
+  const n = Math.max(total - 1, 1);
+  const t = idx / n;
+  const hue = 220 - Math.round(45 * t);
+  const sat = 90;
+  const light = 45 + Math.round(12 * t);
+  return `hsl(${hue}, ${sat}%, ${light}%)`;
+}
+
+function segmentColorWarm(idx) {
+  const warm = ["#ff6d00", "#ff7043", "#ff5722", "#f4511e"];
+  return warm[idx % warm.length];
+}
+
 async function osrmLeg(start, end) {
   const [lat1, lon1] = start;
   const [lat2, lon2] = end;
@@ -218,19 +260,61 @@ async function osrmLeg(start, end) {
 }
 
 async function drawRoadRoute(latlngs, renderSeq) {
-  const merged = [];
+  const legSegments = [];
   for (let i = 0; i < latlngs.length - 1; i += 1) {
     try {
       const leg = await osrmLeg(latlngs[i], latlngs[i + 1]);
-      if (!leg || !leg.length) continue;
-      if (!merged.length) merged.push(...leg);
-      else merged.push(...leg.slice(1));
-    } catch (_) {}
+      if (leg && leg.length) legSegments.push({ idx: i, coords: leg });
+      else legSegments.push({ idx: i, coords: [latlngs[i], latlngs[i + 1]] });
+    } catch (_) {
+      legSegments.push({ idx: i, coords: [latlngs[i], latlngs[i + 1]] });
+    }
   }
   if (renderSeq !== mapRenderSeq) return;
-  if (merged.length >= 2) {
-    L.polyline(merged, { color: "#1f6fff", weight: 4, opacity: 0.98 }).addTo(routeLayer);
+  legSegments.forEach((seg) => {
+    const line = segmentLayers.road[seg.idx];
+    if (!line) return;
+    line.setLatLngs(seg.coords);
+  });
+}
+
+function renderLegend(latlngs) {
+  if (!routeLegend) return;
+  const legs = Math.max(latlngs.length - 1, 0);
+  if (!legs) {
+    routeLegend.classList.add("hidden");
+    routeLegend.innerHTML = "";
+    return;
   }
+  routeLegend.classList.remove("hidden");
+  const maxShow = legs;
+  const rows = [];
+  for (let i = 0; i < maxShow; i += 1) {
+    const checked = segmentLayers.visible[i] !== false ? "checked" : "";
+    rows.push(
+      `<label class="route-legend-row"><input class="route-legend-check" type="checkbox" data-seg="${i}" ${checked} /><span class="route-legend-color" style="background:${segmentColorBlue(
+        i,
+        legs
+      )}"></span><span>Tramo ${i + 1}</span></label>`
+    );
+  }
+  routeLegend.innerHTML = `<div class="route-legend-title">Orden de tramos (azul = ruta calles)</div>${rows.join(
+    ""
+  )}`;
+  routeLegend.querySelectorAll(".route-legend-check").forEach((el) => {
+    el.addEventListener("change", (ev) => {
+      const idx = Number(ev.target.dataset.seg);
+      const on = !!ev.target.checked;
+      segmentLayers.visible[idx] = on;
+      const a = segmentLayers.straight[idx];
+      const b = segmentLayers.road[idx];
+      [a, b].forEach((layer) => {
+        if (!layer) return;
+        if (on) routeLayer.addLayer(layer);
+        else routeLayer.removeLayer(layer);
+      });
+    });
+  });
 }
 
 function renderMap(pois, cityName, variant) {
@@ -240,6 +324,10 @@ function renderMap(pois, cityName, variant) {
   routeLayer.clearLayers();
   if (!pois.length) {
     mapCaption.textContent = "Sin POIs para dibujar";
+    if (routeLegend) {
+      routeLegend.classList.add("hidden");
+      routeLegend.innerHTML = "";
+    }
     return;
   }
   const latlngs = pois
@@ -247,13 +335,45 @@ function renderMap(pois, cityName, variant) {
     .map((p) => [Number(p.lat), Number(p.lon)]);
   if (!latlngs.length) {
     mapCaption.textContent = "Sin coordenadas disponibles en esta variante";
+    if (routeLegend) {
+      routeLegend.classList.add("hidden");
+      routeLegend.innerHTML = "";
+    }
     return;
   }
   map.fitBounds(L.latLngBounds(latlngs).pad(0.2));
+  const legs = Math.max(latlngs.length - 1, 0);
+  segmentLayers = {
+    straight: new Array(legs).fill(null),
+    road: new Array(legs).fill(null),
+    visible: new Array(legs).fill(true),
+  };
 
-  L.polyline(latlngs, { color: "#ff6d00", weight: 3, opacity: 0.95, dashArray: "10,6" }).addTo(routeLayer);
-  L.polyline(latlngs, { color: "#0a84ff", weight: 5, opacity: 0.95 }).addTo(routeLayer);
+  for (let i = 0; i < latlngs.length - 1; i += 1) {
+    const line = L.polyline([latlngs[i], latlngs[i + 1]], {
+      color: segmentColorWarm(i),
+      weight: 2.8,
+      opacity: 0.95,
+      dashArray: "10,6",
+    });
+    segmentLayers.straight[i] = line;
+    if (segmentLayers.visible[i] !== false) {
+      line.addTo(routeLayer);
+    }
+
+    // Fallback inmediato para ruta por calles (se reemplaza luego por OSRM).
+    const roadLine = L.polyline([latlngs[i], latlngs[i + 1]], {
+      color: segmentColorBlue(i, latlngs.length - 1),
+      weight: 4,
+      opacity: 0.98,
+    });
+    segmentLayers.road[i] = roadLine;
+    if (segmentLayers.visible[i] !== false) {
+      roadLine.addTo(routeLayer);
+    }
+  }
   drawRoadRoute(latlngs, renderSeq);
+  renderLegend(latlngs);
 
   pois.forEach((poi) => {
     if (!Number.isFinite(Number(poi.lat)) || !Number.isFinite(Number(poi.lon))) return;
@@ -450,6 +570,23 @@ function saveCurrentResult() {
   });
 }
 
+function toggleMapFullscreen() {
+  const card = mapCard || document.querySelector(".map-card");
+  if (!card) return;
+  if (!document.fullscreenElement) {
+    card.requestFullscreen?.();
+  } else {
+    document.exitFullscreen?.();
+  }
+}
+
+function onFullscreenChanged() {
+  if (mapFullscreenBtn) {
+    mapFullscreenBtn.textContent = document.fullscreenElement ? "Exit" : "Fullscreen";
+  }
+  setTimeout(() => map?.invalidateSize(), 100);
+}
+
 async function resetSavedRoutes() {
   const ok = window.confirm("¿Borrar rutas guardadas? Se limpiara localStorage y backend (si esta disponible).");
   if (!ok) return;
@@ -555,6 +692,9 @@ if (openMapPickerBtn) openMapPickerBtn.addEventListener("click", openMapPicker);
 if (closeMapPickerBtn) closeMapPickerBtn.addEventListener("click", closeMapPicker);
 if (mapPickerBackdrop) mapPickerBackdrop.addEventListener("click", closeMapPicker);
 if (applyMapPickerBtn) applyMapPickerBtn.addEventListener("click", applyMapPickerSelection);
+if (mapStyleSelect) mapStyleSelect.addEventListener("change", (e) => setBaseLayer(e.target.value));
+if (mapFullscreenBtn) mapFullscreenBtn.addEventListener("click", toggleMapFullscreen);
+document.addEventListener("fullscreenchange", onFullscreenChanged);
 window.openMapPickerUI = openMapPicker;
 
 refreshSavedBtn.addEventListener("click", () => {
