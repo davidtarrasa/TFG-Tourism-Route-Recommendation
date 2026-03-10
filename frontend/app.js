@@ -4,27 +4,8 @@ const CITY_META = {
   Q864965: { name: "Petaling Jaya", center: [3.1073, 101.6067] },
 };
 
-const CATEGORY_POOL = [
-  "food",
-  "culture",
-  "nature",
-  "nightlife",
-  "shopping",
-  "service",
-  "health",
-  "entertainment",
-  "transport",
-  "relaxation",
-  "family",
-  "sports",
-];
 const VARIANT_ORDER = ["full", "history", "inputs", "location"];
-const VARIANT_LABEL = {
-  full: "Full",
-  history: "History",
-  inputs: "Inputs",
-  location: "Location",
-};
+const VARIANT_LABEL = { full: "Full", history: "History", inputs: "Inputs", location: "Location" };
 
 function apiBaseUrl() {
   const q = new URLSearchParams(window.location.search).get("api");
@@ -41,11 +22,23 @@ function parseCoord(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const toRad = (x) => (x * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
 let map;
 let markersLayer;
 let routeLayer;
 let currentResult = null;
-
+let mapRenderSeq = 0;
 let mapPicker;
 let mapPickerMarker;
 let pickerLatLon = null;
@@ -79,10 +72,10 @@ const mapPickerCaption = document.getElementById("map-picker-caption");
 
 function initMap() {
   map = L.map("map", { zoomControl: true }).setView(CITY_META.Q35765.center, 12);
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: "&copy; OpenStreetMap contributors",
-  }).addTo(map);
+  L.tileLayer(
+    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    { maxZoom: 19, attribution: "Esri" }
+  ).addTo(map);
   markersLayer = L.layerGroup().addTo(map);
   routeLayer = L.layerGroup().addTo(map);
 }
@@ -115,14 +108,9 @@ function budgetToTier(budget) {
 function applyCityCenter(qid, force = true) {
   const c = CITY_META[qid];
   if (!c) return;
-  const latStr = Number(c.center[0]).toFixed(4);
-  const lonStr = Number(c.center[1]).toFixed(4);
-  if (force || !latInput.value) latInput.value = latStr;
-  if (force || !lonInput.value) lonInput.value = lonStr;
-
-  if (mapPicker && !mapPickerModal.classList.contains("hidden")) {
-    mapPicker.setView(c.center, 13);
-  }
+  if (force || !latInput.value) latInput.value = Number(c.center[0]).toFixed(4);
+  if (force || !lonInput.value) lonInput.value = Number(c.center[1]).toFixed(4);
+  if (mapPicker && !mapPickerModal.classList.contains("hidden")) mapPicker.setView(c.center, 13);
 }
 
 function buildPayload() {
@@ -131,11 +119,9 @@ function buildPayload() {
   const prefs = readPreferences();
   const proximity = document.getElementById("proximity").checked;
   const userIdRaw = document.getElementById("user-id").value;
-
   const lat = parseCoord(latInput.value);
   const lon = parseCoord(lonInput.value);
   const userId = userIdRaw ? Number(userIdRaw) : null;
-
   const prefTokens = [...prefs];
   if (budget === "low") prefTokens.push("cheap");
   if (budget === "high") prefTokens.push("expensive");
@@ -154,9 +140,8 @@ function buildPayload() {
     embeddings_path: `src/recommender/cache/word2vec_${cityQid.toLowerCase()}.joblib`,
     use_als: true,
     als_path: `src/recommender/cache/als_${cityQid.toLowerCase()}.joblib`,
-    // Interactive UI should use a lower limit than offline eval to keep response time acceptable.
     visits_limit: 10000,
-    build_route: false,
+    build_route: true,
     _prefer_location: proximity,
   };
 }
@@ -177,53 +162,113 @@ async function fetchRecommendation(payload) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(requestPayload),
   });
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Backend ${response.status}: ${text}`);
-  }
+  if (!response.ok) throw new Error(`Backend ${response.status}: ${await response.text()}`);
   const data = await response.json();
   return { data, source: "backend", warning: "" };
 }
 
 function routeWithOrder(route) {
-  const rows = route?.results || [];
+  const orderedRows = route?.route?.ordered_pois;
+  const rawRows = route?.results;
+  const rows = Array.isArray(orderedRows) && orderedRows.length ? orderedRows : rawRows || [];
   return rows.map((p, idx) => ({ ...p, order: idx + 1 }));
 }
 
+function withLegDistances(pois) {
+  return pois.map((poi, i) => {
+    if (Number.isFinite(Number(poi.distance_km))) return poi;
+    if (i === 0) return { ...poi, distance_km: null, leg_distance_km: null };
+    const prev = pois[i - 1];
+    const ok =
+      Number.isFinite(Number(prev?.lat)) &&
+      Number.isFinite(Number(prev?.lon)) &&
+      Number.isFinite(Number(poi.lat)) &&
+      Number.isFinite(Number(poi.lon));
+    if (!ok) return { ...poi, distance_km: null, leg_distance_km: null };
+    return {
+      ...poi,
+      leg_distance_km: haversineKm(Number(prev.lat), Number(prev.lon), Number(poi.lat), Number(poi.lon)),
+    };
+  });
+}
+
+function routeTotalKm(route, pois) {
+  const backendTotal = Number(route?.route?.total_km);
+  if (Number.isFinite(backendTotal) && backendTotal > 0) return backendTotal;
+  let total = 0;
+  for (let i = 1; i < pois.length; i += 1) {
+    const d = Number(pois[i].distance_km ?? pois[i].leg_distance_km);
+    if (Number.isFinite(d)) total += d;
+  }
+  return total;
+}
+
+async function osrmLeg(start, end) {
+  const [lat1, lon1] = start;
+  const [lat2, lon2] = end;
+  const url =
+    `https://router.project-osrm.org/route/v1/driving/${lon1},${lat1};${lon2},${lat2}` +
+    "?overview=full&geometries=geojson";
+  const r = await fetch(url);
+  if (!r.ok) return null;
+  const payload = await r.json();
+  const coords = payload?.routes?.[0]?.geometry?.coordinates || [];
+  if (!coords.length) return null;
+  return coords.map((c) => [Number(c[1]), Number(c[0])]);
+}
+
+async function drawRoadRoute(latlngs, renderSeq) {
+  const merged = [];
+  for (let i = 0; i < latlngs.length - 1; i += 1) {
+    try {
+      const leg = await osrmLeg(latlngs[i], latlngs[i + 1]);
+      if (!leg || !leg.length) continue;
+      if (!merged.length) merged.push(...leg);
+      else merged.push(...leg.slice(1));
+    } catch (_) {}
+  }
+  if (renderSeq !== mapRenderSeq) return;
+  if (merged.length >= 2) {
+    L.polyline(merged, { color: "#1f6fff", weight: 4, opacity: 0.98 }).addTo(routeLayer);
+  }
+}
+
 function renderMap(pois, cityName, variant) {
+  mapRenderSeq += 1;
+  const renderSeq = mapRenderSeq;
   markersLayer.clearLayers();
   routeLayer.clearLayers();
   if (!pois.length) {
     mapCaption.textContent = "Sin POIs para dibujar";
     return;
   }
-
   const latlngs = pois
-    .filter((p) => p.lat != null && p.lon != null)
-    .map((p) => [p.lat, p.lon]);
-  if (!latlngs.length) return;
-
+    .filter((p) => Number.isFinite(Number(p.lat)) && Number.isFinite(Number(p.lon)))
+    .map((p) => [Number(p.lat), Number(p.lon)]);
+  if (!latlngs.length) {
+    mapCaption.textContent = "Sin coordenadas disponibles en esta variante";
+    return;
+  }
   map.fitBounds(L.latLngBounds(latlngs).pad(0.2));
 
-  L.polyline(latlngs, { color: "#0a84ff", weight: 5, opacity: 0.9 }).addTo(routeLayer);
+  L.polyline(latlngs, { color: "#ff6d00", weight: 3, opacity: 0.95, dashArray: "10,6" }).addTo(routeLayer);
+  L.polyline(latlngs, { color: "#0a84ff", weight: 5, opacity: 0.95 }).addTo(routeLayer);
+  drawRoadRoute(latlngs, renderSeq);
 
   pois.forEach((poi) => {
-    if (poi.lat == null || poi.lon == null) return;
-    const marker = L.circleMarker([poi.lat, poi.lon], {
-      radius: 9,
-      color: "#0a6bd1",
-      fillColor: "#37a0ff",
-      fillOpacity: 0.95,
-      weight: 2,
-    }).addTo(markersLayer);
+    if (!Number.isFinite(Number(poi.lat)) || !Number.isFinite(Number(poi.lon))) return;
+    const icon = L.divIcon({
+      className: "order-badge",
+      html: `<div style="width:24px;height:24px;border-radius:50%;background:#0b3d91;color:#fff;font-size:12px;font-weight:700;line-height:24px;text-align:center;border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.45);">${poi.order}</div>`,
+      iconSize: [24, 24],
+      iconAnchor: [12, 12],
+    });
+    const marker = L.marker([Number(poi.lat), Number(poi.lon)], { icon }).addTo(markersLayer);
     marker.bindTooltip(`${poi.order}. ${poi.name}`, { direction: "top" });
     marker.bindPopup(
-      `<strong>${poi.order}. ${poi.name}</strong><br/>${poi.primary_category || "N/A"} · Rating: ${
-        poi.rating ?? "N/A"
-      }`
+      `<strong>${poi.order}. ${poi.name}</strong><br/>${poi.primary_category || "N/A"} · Rating: ${poi.rating ?? "N/A"}`
     );
   });
-
   mapCaption.textContent = `${cityName} · ${VARIANT_LABEL[variant] || variant} · ${pois.length} paradas`;
 }
 
@@ -235,6 +280,11 @@ function renderList(pois, city, source, routeType) {
   }
   resultMeta.textContent = `${city} · ruta ${routeType} · fuente: ${source}`;
   pois.forEach((poi) => {
+    const dist = Number.isFinite(Number(poi.distance_km))
+      ? Number(poi.distance_km)
+      : Number.isFinite(Number(poi.leg_distance_km))
+      ? Number(poi.leg_distance_km)
+      : null;
     const item = document.createElement("article");
     item.className = "poi-item";
     item.innerHTML = `
@@ -242,7 +292,7 @@ function renderList(pois, city, source, routeType) {
       <div class="poi-meta">
         <span>Categoría: ${poi.primary_category ?? "N/A"}</span>
         <span>Rating: ${poi.rating ?? "N/A"}</span>
-        <span>Distancia: ${poi.distance_km ?? "N/A"} km</span>
+        <span>Distancia: ${dist == null ? "N/A" : dist.toFixed(2)} km</span>
       </div>
     `;
     poiList.appendChild(item);
@@ -259,7 +309,7 @@ function renderVariants(variants, activeKey, onSelect) {
   routeVariants.classList.remove("hidden");
   routeVariants.innerHTML = "";
   keys.forEach((key) => {
-    const n = (variants[key]?.results || []).length;
+    const n = routeWithOrder(variants[key]).length;
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = `variant-btn ${key === activeKey ? "is-active" : ""}`;
@@ -279,11 +329,11 @@ function renderVariantSummary(variants, activeKey, onSelect) {
   routeSummary.classList.remove("hidden");
   routeSummary.innerHTML = "";
   keys.forEach((key) => {
-    const rows = variants[key]?.results || [];
+    const rows = withLegDistances(routeWithOrder(variants[key]));
     const avgRating = rows.length
       ? (rows.reduce((acc, r) => acc + (Number(r.rating) || 0), 0) / rows.length).toFixed(2)
       : "--";
-    const totalDist = rows.reduce((acc, r) => acc + (Number(r.distance_km) || 0), 0);
+    const totalDist = routeTotalKm(variants[key], rows);
     const card = document.createElement("article");
     card.className = `route-summary-card ${key === activeKey ? "is-active" : ""}`;
     card.innerHTML = `
@@ -347,6 +397,7 @@ async function loadSavedRoutes() {
       return;
     }
   } catch (_) {}
+
   const local = JSON.parse(localStorage.getItem("tfg_saved_routes") || "[]");
   const filtered = local.filter((x) => (!cityQid || x.city_qid === cityQid) && (userId == null || x.user_id === userId));
   renderSavedRoutes(filtered.slice().reverse().slice(0, 30), "local");
@@ -373,10 +424,7 @@ async function saveCurrentResultToBackend(item) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Backend ${response.status}: ${text}`);
-  }
+  if (!response.ok) throw new Error(`Backend ${response.status}: ${await response.text()}`);
   const data = await response.json();
   setInfo(`Ruta guardada en localStorage + backend (id ${data.id}).`);
   await loadSavedRoutes();
@@ -398,12 +446,12 @@ function saveCurrentResult() {
   localStorage.setItem(key, JSON.stringify(prev));
   setInfo(`Ruta guardada en localStorage (${prev.length} guardadas). Guardando también en backend...`);
   saveCurrentResultToBackend(item).catch((err) => {
-    setInfo(`Guardado local OK. Backend save falló: ${err.message}`);
+    setInfo(`Guardado local OK. Backend save fallo: ${err.message}`);
   });
 }
 
 async function resetSavedRoutes() {
-  const ok = window.confirm("¿Borrar rutas guardadas? Se limpiará localStorage y backend (si está disponible).");
+  const ok = window.confirm("¿Borrar rutas guardadas? Se limpiara localStorage y backend (si esta disponible).");
   if (!ok) return;
   localStorage.removeItem("tfg_saved_routes");
 
@@ -418,17 +466,10 @@ async function resetSavedRoutes() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ user_id: userId, city_qid: cityQid }),
     });
-    if (response.ok) {
-      const data = await response.json();
-      deleted = data.deleted;
-    }
+    if (response.ok) deleted = (await response.json()).deleted;
   } catch (_) {}
-
-  if (deleted == null) {
-    setInfo("LocalStorage reseteado. Backend no disponible o sin borrar.");
-  } else {
-    setInfo(`LocalStorage reseteado y backend limpiado (${deleted} registros).`);
-  }
+  if (deleted == null) setInfo("LocalStorage reseteado. Backend no disponible o sin borrar.");
+  else setInfo(`LocalStorage reseteado y backend limpiado (${deleted} registros).`);
   await loadSavedRoutes();
 }
 
@@ -440,7 +481,7 @@ function renderSelectedVariant(source) {
   if (!currentResult) return;
   const selected = currentResult.selectedVariant;
   const route = currentResult.routes[selected];
-  const pois = routeWithOrder(route);
+  const pois = withLegDistances(routeWithOrder(route));
   renderMap(pois, currentResult.city, selected);
   renderList(pois, currentResult.city, source, selected);
   renderVariants(currentResult.routes, selected, (nextKey) => {
@@ -455,7 +496,7 @@ function renderSelectedVariant(source) {
 
 function openMapPicker() {
   if (!mapPickerModal) {
-    setError("No se encontró el modal de mapa en el DOM.");
+    setError("No se encontro el modal de mapa en el DOM.");
     return;
   }
   const city = CITY_META[cityInput.value] || CITY_META.Q35765;
@@ -470,11 +511,8 @@ function openMapPicker() {
     }).addTo(mapPicker);
     mapPicker.on("click", (e) => {
       pickerLatLon = [e.latlng.lat, e.latlng.lng];
-      if (!mapPickerMarker) {
-        mapPickerMarker = L.marker([e.latlng.lat, e.latlng.lng]).addTo(mapPicker);
-      } else {
-        mapPickerMarker.setLatLng([e.latlng.lat, e.latlng.lng]);
-      }
+      if (!mapPickerMarker) mapPickerMarker = L.marker([e.latlng.lat, e.latlng.lng]).addTo(mapPicker);
+      else mapPickerMarker.setLatLng([e.latlng.lat, e.latlng.lng]);
       mapPickerCaption.textContent = `Seleccionado: ${e.latlng.lat.toFixed(6)}, ${e.latlng.lng.toFixed(6)}`;
     });
   }
@@ -507,7 +545,6 @@ function applyMapPickerSelection() {
 stopsInput.addEventListener("input", () => {
   stopsValue.textContent = stopsInput.value;
 });
-
 cityInput.addEventListener("change", () => {
   applyCityCenter(cityInput.value, true);
   loadSavedRoutes().catch(() => {});
@@ -529,10 +566,9 @@ exportBtn.addEventListener("click", () => {
   const cityName = currentResult.city.toLowerCase().replace(/\s+/g, "_");
   downloadJSON(currentResult.raw, `multi_route_${cityName}.json`);
 });
-
 saveBtn.addEventListener("click", saveCurrentResult);
 resetSavedBtn.addEventListener("click", () => {
-  resetSavedRoutes().catch((err) => setError(`Reset falló: ${err.message}`));
+  resetSavedRoutes().catch((err) => setError(`Reset fallo: ${err.message}`));
 });
 
 form.addEventListener("submit", async (event) => {
@@ -540,25 +576,22 @@ form.addEventListener("submit", async (event) => {
   setLoading(true);
   setError("");
   setInfo("");
-
   const payload = buildPayload();
   let apiResult;
   try {
     apiResult = await fetchRecommendation(payload);
   } catch (err) {
     setLoading(false);
-    const msg = err && err.name === "AbortError"
-      ? "Tiempo de espera agotado (UI timeout). Prueba con menos paradas o vuelve a intentar."
-      : `Backend no disponible (${err.message}).`;
-    setError(msg);
+    setError(`Backend no disponible (${err.message}).`);
     return;
   }
+
   const { data, source, warning } = apiResult;
   const routes = data?.routes || {};
   const selectedVariant = selectPrimaryRoute(routes, payload._prefer_location);
   if (!selectedVariant) {
     setLoading(false);
-    setError("No se han generado rutas para esta petición.");
+    setError("No se han generado rutas para esta peticion.");
     return;
   }
 
@@ -570,15 +603,12 @@ form.addEventListener("submit", async (event) => {
     routes,
     raw: data,
   };
-
   exportBtn.disabled = false;
   saveBtn.disabled = false;
-
   if (warning) setInfo(warning);
   if (Array.isArray(data?.warnings) && data.warnings.length) {
     setInfo(`${warning ? `${warning} · ` : ""}${data.warnings.join(" | ")}`);
   }
-
   renderSelectedVariant(source);
   setLoading(false);
 });
