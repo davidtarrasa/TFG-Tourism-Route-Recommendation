@@ -24,6 +24,12 @@ docker compose up -d db pgadmin
 python src/etl/08_load_postgres.py --dsn postgresql://tfg:tfgpass@localhost:55432/tfg_routes
 ```
 
+Optional dev tools:
+
+```bash
+pip install -r requirements-dev.txt
+```
+
 ## Core Recommender Commands
 
 Train city-specific artifacts:
@@ -66,6 +72,9 @@ Endpoints:
 - `GET /health`
 - `POST /recommend`
 - `POST /multi-recommend`
+- `POST /saved-routes`
+- `GET /saved-routes`
+- `DELETE /saved-routes`
 
 ## Frontend
 

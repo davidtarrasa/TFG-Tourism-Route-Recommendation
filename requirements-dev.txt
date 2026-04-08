@@ -1,0 +1,8 @@
+﻿-r requirements.txt
+
+# Dev / quality
+pytest==8.4.2
+pytest-cov==7.0.0
+ruff==0.13.0
+black==25.1.0
+ipykernel==6.29.5

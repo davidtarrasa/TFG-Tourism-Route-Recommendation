@@ -1,180 +1,101 @@
-Nota de producto
+﻿Nota de producto
 ----------------
 - La CLI se usa para desarrollo, validacion y experimentacion interna.
 - En la version de consumo (web/app), el usuario final no introducira comandos: toda la interaccion sera mediante interfaz.
-- Configuracion por ciudad: si existe `configs/recommender_<city_qid>.toml`, se carga automaticamente; si no, fallback a `configs/recommender.toml`.
-Metodología del recomendador (versión CLI)
+- Configuracion por ciudad: si existe `configs/recommender_<city_qid>.toml`, se carga automaticamente; si no, se usa `configs/recommender.toml`.
+
+Metodologia del recomendador (version CLI)
 ==========================================
 
 Objetivo
 --------
-Recomendar y secuenciar POIs para usuarios (registrados o nuevos) usando datos limpios en Postgres (`visits`, `pois`, `poi_categories`) y heurísticas/ML ligeras. Generar una lista top-K y, opcionalmente, un orden (ruta) que luego se puede dibujar con OSRM/Geoapify.
+Recomendar y secuenciar POIs para usuarios (registrados o nuevos) usando datos en Postgres (`visits`, `pois`, `poi_categories`).
 
 Entradas esperadas (CLI/API)
 ----------------------------
-- `--user-id`: opcional. Si existe en `visits`, habilita CF/Markov personal.
-- `--city`: filtra candidatos (matching con `pois.city`).
-- `--city-qid`: filtra por ciudad usando el QID de Wikidata (coherente entre `visits.venue_city` y `pois.city_qid`).
-- Preferencias: categorÃ­as (`--prefs "museum,food"`), precio (`price_tier`, `is_free`), nÂº de paradas (`--k`), ubicaciÃ³n actual (`--lat --lon`) o `--current-poi`.
-- Modo: `--mode hybrid|markov|content|item` (para debug) y re-ranking por distancia opcional.
+- `--user-id`: opcional. Si existe en `visits`, habilita personalizacion por historial.
+- `--city` o `--city-qid`: filtra candidatos por ciudad.
+- Preferencias: `--prefs`, precio (`max_price_tier`), gratis (`free_only`), numero de paradas (`--k`), ubicacion (`--lat --lon`) o `--current-poi`.
+- Modo: `--mode hybrid|markov|content|item|embed|als`.
 
-`--prefs` (minimalista)
------------------------
-Una sola cadena separada por comas que se mapea a filtros/boosts:
+`--prefs` (formato)
+-------------------
+Cadena separada por comas:
 - keywords: `free|paid|cheap|mid|expensive|price:N|max_price:N`
-- otros tokens: se interpretan como preferencias de categorías (se aplica un *boost* si el POI coincide con la categoría primaria o alguna categoría secundaria).
+- otros tokens: se interpretan como preferencias de categoria/intencion.
 
 Fuentes de datos y features
 ---------------------------
-- POIs (`pois`): lat, lon, city, rating, price_tier, is_free, primary_category + lista de categorías (`poi_categories`).
-- Visitas (`visits`): trail_id, user_id, venue_id, venue_city, timestamp → secuencias por usuario/trail.
-- Features a construir (features/):
-  - TF-IDF de categorías por POI (usando `poi_categories.name`).
-  - Co-ocurrencias POI↔POI (misma ruta/usuario) para item-item.
-  - Transiciones Markov POI→POI y categoría→categoría (ordenadas por timestamp/trail).
-  - Embeddings secuenciales (Word2Vec) sobre secuencias de POIs como alternativa “state of the art” ligera.
-  - Opcional: matriz usuario-POI binaria para ALS/BPR implícito.
+- POIs (`pois`): lat, lon, city, rating, price_tier, is_free, primary_category.
+- Visitas (`visits`): trail_id, user_id, venue_id, venue_city, timestamp.
+- Features:
+  - TF-IDF de categorias (content)
+  - Co-visitas POI-POI (item)
+  - Transiciones Markov POI->POI y categoria->categoria
+  - Embeddings secuenciales (Word2Vec)
+  - ALS implicito (usuario-POI)
 
-Motores de recomendación (models/)
-----------------------------------
-- Content-based:
-  - Similaridad coseno sobre TF-IDF de categorías; perfil de usuario = media de sus POIs visitados.
-  - Re-ponderar por rating, total_ratings, price_tier/is_free según preferencias.
-  - Útil para cold-start y usuarios nuevos.
-- Item-item (co-visitas):
-  - Matriz de co-ocurrencia; score = suma de similitudes con POIs del usuario.
-  - Rápido, no requiere factorizar.
-- Markov / secuencial:
-  - Matriz de transiciones POI→POI; dado `current_poi`, sugerir siguientes por probabilidad y romper empates con distancia y rating.
-  - Matriz categoría→categoría como fallback cuando no se conoce el POI actual.
-  - Variante embeddings: Word2Vec sobre secuencias para vecinos semántico-secuenciales.
-- CF implícito (opcional):
-  - ALS/BPR sobre matriz usuario-POI (check-ins). Útil para usuarios con historial; requiere librería `implicit`.
+Motores de recomendacion
+------------------------
+- `content`: similitud por categorias
+- `item`: co-visitas
+- `markov`: siguiente POI por transicion
+- `embed`: vecinos secuenciales por embeddings
+- `als`: collaborative filtering implicito
+- `hybrid`: fusion ponderada de senales
 
-Orquestación y scoring (scorer.py)
-----------------------------------
-1. Generar candidatos filtrando por ciudad y disponibilidad de coords.
-2. Calcular scores por motor (según modo o híbrido).
-3. Normalizar scores (0–1) y combinar: p.ej. `score = 0.4*item_item + 0.3*content + 0.3*markov`.
-4. Re-ranking:
-   - Penalizar distancia al punto actual (`lat/lon` o `current_poi`) si se pasa.
-   - Filtrar/penalizar por price_tier/is_free y categorías ya vistas en la sesión.
-   - Opcional: diversidad de categorías en top-K.
-5. Seleccionar top-K POIs.
-6. Ordenar para ruta (heurística vecino más cercano sobre los K seleccionados). Si se quiere geometría, llamar a OSRM/Geoapify para la polilínea.
+Orquestacion y scoring (`scorer.py`)
+------------------------------------
+1. Construccion de candidatos.
+2. Calculo de score por motor.
+3. Normalizacion y fusion de scores.
+4. Re-ranking por distancia, precio/gratis, diversidad y preferencias.
+5. Seleccion top-K.
+6. Orden de ruta con heuristica de planificador.
 
-CLI (cli.py, futuro)
---------------------
-- Uso esperado: `python -m src.recommender.cli --user-id 5 --city osaka --k 7 --mode hybrid --current-poi <id> --lat ... --lon ... --prefs "museum,cheap"`.
-- Output: tabla con POIs (score, categoría, rating, price) y, opcionalmente, orden sugerido + enlace/archivo HTML si se llama a ruteo externo.
-
-Carpetas
---------
-- models/: algoritmos (content-based, co-visitas, markov, embeddings, ALS/BPR opcional).
-- features/: carga de datos y construcción de features (TF-IDF, co-ocurrencias, transiciones, Word2Vec).
-- cache/: artefactos ligeros (matrices, modelos entrenados).
-
-Notas técnicas y “state of the art” en versión ligera
------------------------------------------------------
-- Secuencial: Markov POI/categoría (Dietz 2018) y Word2Vec sobre rutas (útil en movilidad/POI recs).
-- CF/Co-visitas: co-ocurrencia y/o ALS implícito para check-ins binarios (baseline robusto).
-- Multi-aspecto: usa rating/price_tier/is_free en re-ranking, siguiendo enfoques multi-factor de la literatura (Hosseini 2017).
-- Geográfico: re-ranking por distancia al punto actual y clustering espacial si se requiere diversidad geográfica.
-
-
-Plan de "multi-ruta" por request (pendiente de implementar)
------------------------------------------------------------
-Idea: ante una request de recomendacion, devolver **varias rutas alternativas** (cada una con un "motivo" distinto) y, opcionalmente, una ruta "full" que combine todas las señales disponibles.
-
-Nota importante: **no** guardamos "historial de rutas generadas". El "historial" se refiere solo a lo que ya existe en la BD (`visits`) para ese `user_id` (check-ins / secuencias historicas).
-
-Señales posibles en una request
--------------------------------
-- Historial: existe si `user_id` aparece en `visits` (hay al menos 1 visita).
-- Inputs del usuario (opcionales): `prefs` / instrucciones / restricciones (p.ej. `free`, `max_price`, categorias objetivo).
-- Ubicacion (opcional): `lat/lon` o `current_poi`.
-
-Regla de oro: si una señal no viene, **no debe afectar** a las recomendaciones que no la usan (no "ensuciar" otras rutas).
-
-Rutas a devolver (por defecto)
+Categorias generales (intents)
 ------------------------------
-1) Ruta por historial ("history")
-   - Usa solo historial (ALS / item-item / markov / content-perfil).
-   - No usa ubicacion ni prefs.
-   - Si el usuario no existe (sin visitas), se omite o se degrada a "popularidad" (si existe) / content generico.
+- Capa de mapeo de categorias ruidosas a intents compactos (`category_intents.py`).
+- Dos modos:
+  - `soft`: boost por match de categoria/intencion.
+  - `strict`: filtro duro por categoria/intencion.
+- Diagnosticos:
+  - `data/reports/diagnostics/category_intent_coverage_summary.csv`
+  - `data/reports/diagnostics/category_intent_full_mapping.csv`
 
-2) Ruta por inputs ("inputs")
-   - Usa prefs/instrucciones como señal dominante.
-   - Implementacion: content-based + filtros/boosts por categorias/price/is_free + diversidad.
-   - No usa historial si el usuario es nuevo. Si el usuario existe, idealmente tampoco usa historial (para aislar el efecto del input).
-   - Si no hay prefs/instrucciones, se omite.
+Contrato multi-ruta por request
+--------------------------------
+Rutas posibles:
+- `history`: domina historial
+- `inputs`: dominan preferencias de usuario
+- `location`: domina cercania geografica
+- `full`: combina todo lo disponible
 
-3) Ruta por ubicacion ("location")
-   - Usa ubicacion como señal dominante.
-   - Implementacion: ranking por distancia (y/o penalizacion fuerte) + filtros basicos (p.ej. ciudad) + diversidad.
-   - Independiente del historial.
-   - Si no hay `lat/lon` ni `current_poi`, se omite.
+Reglas:
+- Si falta una senal, no debe contaminar otras rutas.
+- Para usuario nuevo (sin historial), no se genera `history`.
+- `full` se genera cuando hay suficientes senales para combinar.
 
-4) Ruta con todo ("full")
-   - Combina historial + inputs + ubicacion.
-   - Solo se genera si **estan presentes las 3** señales (historial disponible + prefs/instrucciones + ubicacion).
-   - Implementacion: hibrido con pesos + reranking por distancia + filtros/boosts por prefs.
-   - Si falta alguna de las 3 señales, NO se crea esta ruta (para que el nombre "full" sea consistente).
+Estado actual
+-------------
+- Documentado: SI
+- Implementado en API/CLI: SI (prototipo operativo)
+- Pendiente: pulido final de UX y reglas de producto para web.
 
-Comportamiento para usuario nuevo vs existente
-----------------------------------------------
-- Usuario existente:
-  - Puede recibir 1..4 rutas segun señales presentes.
-  - "history" siempre posible (si hay historial suficiente), "inputs" y "location" solo si vienen, "full" solo si vienen todas.
-
-- Usuario nuevo (no existe en `visits`):
-  - No se permite usar historial (no existe).
-  - Debe venir al menos un input (prefs y/o ubicacion). Si no viene ninguno: devolver error claro ("missing_input") o pedir datos.
-  - Puede recibir "inputs" y/o "location". "history" se omite. "full" no aplica (falta historial).
-
-Formato de respuesta (idea)
----------------------------
-Devolver algo tipo JSON (CLI puede imprimirlo o guardar a fichero) con:
-- `routes[]` donde cada ruta tenga:
-  - `type`: history|inputs|location|full
-  - `signals_used`: {history:bool, inputs:bool, location:bool}
-  - `pois`: lista ordenada de POIs con score y metadatos
-  - `explanations` (breve): por que se elige cada POI (top factores)
-  - `map_outputs` (opcional): html + geojson
-
-
-Estado de implementacion de multi-ruta
---------------------------------------
-- Documentado: SI (este README define reglas de negocio y comportamiento esperado).
-- Implementado completo en producto/API: NO.
-- Estado actual en CLI: se ejecuta un solo `--mode` por request y se puede construir una ruta.
-- Pendiente: endpoint/servicio que devuelva en una respuesta varias rutas (`history`, `inputs`, `location`, `full`) segun señales disponibles.
-
-
-Benchmark unico 3 ciudades (implementado)
------------------------------------------
-Comando recomendado:
+Benchmark unico 3 ciudades
+--------------------------
+Comando principal:
 - `python -m src.recommender.benchmark_3cities --run-eval --run-routes`
-- opcional entrenamiento: `--run-train` (o `--train`)
-- protocolo por defecto: `last_trail_user` (override con `--protocol trail`)
 
-Ejecuta, para `Q35765`, `Q406`, `Q864965`:
-1) entrenamiento (si se solicita), 2) evaluate ranking, 3) evaluate_routes, 4) resumen comparativo.
+Opcional entrenamiento previo:
+- `python -m src.recommender.benchmark_3cities --run-train --run-eval --run-routes`
 
-Salida esperada:
-- JSON por ciudad (`eval_*`, `eval_routes_*`)
-- un resumen consolidado (`data/reports/benchmarks/benchmark_3cities_summary.json`)
-- opcional CSV/tabla markdown para informe del TFG.
-
-
-Protocolo principal de evaluacion (actual)
-------------------------------------------
-- `last_trail_user`:
-  - si un usuario tiene solo 1 trail, ese trail se queda en train (no test)
-  - si tiene >=2 trails, se usa el ultimo trail como test solo si tiene al menos 4 POIs
-  - el resto de trails van a train
-  - seed de prediccion = primer POI del trail de test
-  - verdad objetivo = resto de POIs del trail de test no vistos
+Protocolos de evaluacion
+------------------------
+Protocolo recomendado:
+- `last_trail_user`
+  - si usuario tiene 1 trail: queda en train
+  - si tiene >=2 trails y el ultimo tiene >=4 POIs: ultimo a test, resto a train
 
 Metricas ranking principales:
 - `hit@k`
@@ -184,7 +105,7 @@ Metricas ranking principales:
 - `novelty`
 - `diversity`
 
-Nota de inferencia:
-- Para usuario registrado (`user_id` con historial), se excluyen POIs ya visitados de la recomendacion final.
-- Para usuario nuevo/no registrado, ese filtro no aplica.
-
+Nota de inferencia
+------------------
+- Usuario registrado: se excluyen POIs ya visitados en recomendacion final.
+- Usuario nuevo: no aplica ese filtro historico.
