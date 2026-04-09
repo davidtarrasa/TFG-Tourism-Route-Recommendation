@@ -19,7 +19,8 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 
-from .prefs import Prefs
+from .category_intents import INCONCLUSIVE, classify_category_intent, infer_user_intents
+from .prefs import Prefs, normalize_categories
 from .scorer import recommend
 from .utils_db import get_conn
 
@@ -62,6 +63,81 @@ def _user_exists(dsn: Optional[str], user_id: Optional[int], city_qid: Optional[
         return not df.empty
     except Exception:
         return False
+
+
+def _trim_inputs_with_category_coverage(df: pd.DataFrame, prefs: Optional[Prefs], k: int) -> pd.DataFrame:
+    """
+    Ensure `inputs` route visibly reflects requested categories/intents.
+
+    Rule:
+    - If number of requested categories/intents <= k, try to include at least
+      one POI per requested intent/category (when available), then fill by score.
+    - If there are no usable preferences, fallback to top-k by score.
+    """
+    if df is None or df.empty:
+        return df
+    if not prefs or not prefs.categories:
+        return df.head(k).reset_index(drop=True)
+
+    pref_cats = normalize_categories(prefs.categories)
+    if not pref_cats:
+        return df.head(k).reset_index(drop=True)
+
+    requested_intents = [i for i in infer_user_intents(pref_cats) if i and i != INCONCLUSIVE]
+    requested_tokens = requested_intents if requested_intents else [c.lower() for c in pref_cats]
+
+    # Respect product rule: only enforce one-per-category when request size <= k.
+    if len(requested_tokens) > int(k):
+        return df.head(k).reset_index(drop=True)
+
+    ranked = df.copy()
+    if "score" in ranked.columns:
+        ranked = ranked.sort_values("score", ascending=False)
+
+    # Precompute per-row signals.
+    def _row_primary(row: pd.Series) -> str:
+        return str(row.get("primary_category") or "").strip()
+
+    def _row_intent(row: pd.Series) -> str:
+        primary = _row_primary(row)
+        if not primary:
+            return INCONCLUSIVE
+        intent, _, _ = classify_category_intent(primary, use_semantic=False)
+        return intent
+
+    ranked["__primary"] = ranked.apply(_row_primary, axis=1)
+    ranked["__intent"] = ranked.apply(_row_intent, axis=1)
+    ranked["__primary_l"] = ranked["__primary"].str.lower()
+
+    selected_idx: List[int] = []
+    used = set()
+
+    def _pick_first(mask: pd.Series) -> None:
+        for idx in ranked.index[mask]:
+            if idx in used:
+                continue
+            used.add(idx)
+            selected_idx.append(int(idx))
+            return
+
+    if requested_intents:
+        for intent in requested_intents:
+            _pick_first(ranked["__intent"] == intent)
+    else:
+        for tok in requested_tokens:
+            _pick_first(ranked["__primary_l"].str.contains(tok, na=False))
+
+    # Fill remaining positions by original ranking.
+    for idx in ranked.index:
+        if len(selected_idx) >= int(k):
+            break
+        if idx in used:
+            continue
+        used.add(idx)
+        selected_idx.append(int(idx))
+
+    out = ranked.loc[selected_idx].head(k).drop(columns=["__primary", "__intent", "__primary_l"], errors="ignore")
+    return out.reset_index(drop=True)
 
 
 def build_multi_routes(
@@ -138,13 +214,14 @@ def build_multi_routes(
 
     # 2) inputs route: inputs dominant, isolated from history.
     if inputs_present:
+        k_candidates = int(max(k * 4, min(100, k + 20)))
         df = recommend(
             dsn=dsn,
             city=city,
             city_qid=city_qid,
             user_id=None,
             current_poi=None,
-            k=k,
+            k=k_candidates,
             visits_limit=visits_limit,
             mode="content",
             use_embeddings=False,
@@ -162,7 +239,7 @@ def build_multi_routes(
         if df.empty:
             omitted["inputs"] = "empty_result"
         else:
-            routes["inputs"] = df
+            routes["inputs"] = _trim_inputs_with_category_coverage(df=df, prefs=prefs, k=k)
     else:
         omitted["inputs"] = "missing_inputs"
 

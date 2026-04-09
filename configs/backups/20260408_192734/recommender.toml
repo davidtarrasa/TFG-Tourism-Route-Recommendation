@@ -20,19 +20,19 @@ hs = 0
 seed = 42
 
 # How many neighbors per seed POI are used to build recommendation scores.
-topn_score = 500
+topn_score = 2000
 
 # Use the last N items as context instead of only current POI (better sequential signal).
 context_n = 3
 
 # Penalize very popular POIs when scoring embedding neighbors.
-hub_alpha = 0
+hub_alpha = 0.0
 
 [als]
-factors = 64
-regularization = 0.01
-iterations = 15
-alpha = 40
+factors = 256
+regularization = 0.005
+iterations = 60
+alpha = 60.0
 topn_score = 500
 
 [hybrid]
@@ -44,7 +44,7 @@ cold_start   = [0.60, 0.20, 0.20, 0.00, 0.00]
 
 # When we have a current POI and we are building a route step-by-step (trail-like),
 # prefer sequential signals over long-term preference models.
-trail_current = [0, 0.390047955277018, 0.558680595252478, 0, 0.0512714494705044]
+trail_current = [0.0, 0.30635107904580194, 0.6100411771308729, 0.08360774382332524, 0.0]
 
 [filters]
 exclude_categories = ["Intersection", "State", "Home (private)"]
@@ -63,13 +63,15 @@ min_unique_cat_ratio = 0.5  # encourage diversity: >= 50% unique categories in K
 
 [route_planner]
 # Greedy route construction constraints:
-candidate_pool = 600       # how many top-scoring POIs are considered when planning a route
-max_per_category = 1
-pair_min_km = 0.15
-distance_weight = 0.5     # penalize long legs (0..1)
+candidate_pool = 1000       # how many top-scoring POIs are considered when planning a route
+max_per_category = 2
+pair_min_km = 0.22
+distance_weight = 0.35     # penalize long legs (0..1)
+distance_weight_with_anchor = 0.55 # stronger locality when an explicit start location exists
 distance_weight_no_anchor = 0.08  # without explicit lat/lon, keep distance as a soft signal
+max_leg_km_with_anchor = 3.2       # tighter max jump when an explicit start location exists
 max_leg_km_no_anchor = 9.0        # allow larger jumps when no start location is provided
-diversity_bonus = 0     # small bonus for unseen categories
+diversity_bonus = 0.06     # small bonus for unseen categories
 
 [eval]
 # Settings used ONLY when running `python -m src.recommender.eval.evaluate --fair`
@@ -92,5 +94,4 @@ user_top_categories = 5
 
 [markov]
 # Penalize very popular POIs (hubs) in Markov recommendations.
-hub_alpha = 0
-backoff = 0.3
+hub_alpha = 0.5

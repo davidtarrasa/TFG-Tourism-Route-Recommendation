@@ -26,13 +26,13 @@ topn_score = 500
 context_n = 1
 
 # Penalize very popular POIs when scoring embedding neighbors.
-hub_alpha = 0.0
+hub_alpha = 0
 
 [als]
 factors = 128
 regularization = 0.01
 iterations = 15
-alpha = 40.0
+alpha = 40
 topn_score = 500
 
 [hybrid]
@@ -44,7 +44,7 @@ cold_start   = [0.60, 0.20, 0.20, 0.00, 0.00]
 
 # When we have a current POI and we are building a route step-by-step (trail-like),
 # prefer sequential signals over long-term preference models.
-trail_current = [0.06310551543502063, 0.29260972812372893, 0.4785553389244702, 0.08837805858618011, 0.07735135893060004]
+trail_current = [0.0631055154350206, 0.292609728123729, 0.47855533892447, 0.0883780585861801, 0.0773513589306]
 
 [filters]
 exclude_categories = ["Intersection", "State", "Home (private)"]
@@ -65,11 +65,11 @@ min_unique_cat_ratio = 0.5  # encourage diversity: >= 50% unique categories in K
 # Greedy route construction constraints:
 candidate_pool = 600       # how many top-scoring POIs are considered when planning a route
 max_per_category = 1
-pair_min_km = 0.30
-distance_weight = 0.20     # penalize long legs (0..1)
+pair_min_km = 0.3
+distance_weight = 0.2     # penalize long legs (0..1)
 distance_weight_no_anchor = 0.08  # without explicit lat/lon, keep distance as a soft signal
 max_leg_km_no_anchor = 9.0        # allow larger jumps when no start location is provided
-diversity_bonus = 0.00     # small bonus for unseen categories
+diversity_bonus = 0     # small bonus for unseen categories
 
 [eval]
 # Settings used ONLY when running `python -m src.recommender.eval.evaluate --fair`
@@ -92,5 +92,5 @@ user_top_categories = 5
 
 [markov]
 # Penalize very popular POIs (hubs) in Markov recommendations.
-hub_alpha = 0.0
+hub_alpha = 0
 backoff = 0.3
