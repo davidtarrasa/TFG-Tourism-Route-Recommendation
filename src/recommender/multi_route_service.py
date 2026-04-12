@@ -15,7 +15,7 @@ Rules:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
@@ -140,6 +140,104 @@ def _trim_inputs_with_category_coverage(df: pd.DataFrame, prefs: Optional[Prefs]
     return out.reset_index(drop=True)
 
 
+def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    from math import atan2, cos, radians, sin, sqrt
+
+    r = 6371.0
+    dlat = radians(lat2 - lat1)
+    dlon = radians(lon2 - lon1)
+    a = sin(dlat / 2.0) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon / 2.0) ** 2
+    c = 2.0 * atan2(sqrt(a), sqrt(1.0 - a))
+    return r * c
+
+
+def _trim_location_nearest(df: pd.DataFrame, lat: Optional[float], lon: Optional[float], k: int) -> pd.DataFrame:
+    """
+    Make location route clearly proximity-dominant:
+    - compute anchor distance for all candidates
+    - sort primarily by distance (nearest first), then by score as tie-breaker
+    """
+    if df is None or df.empty:
+        return df
+    if lat is None or lon is None:
+        return df.head(k).reset_index(drop=True)
+    if "lat" not in df.columns or "lon" not in df.columns:
+        return df.head(k).reset_index(drop=True)
+
+    work = df.copy()
+
+    def _dist(row: pd.Series) -> float:
+        try:
+            la = float(row.get("lat"))
+            lo = float(row.get("lon"))
+        except Exception:
+            return float("inf")
+        return _haversine_km(float(lat), float(lon), la, lo)
+
+    work["anchor_distance_km"] = work.apply(_dist, axis=1)
+    if "distance_km" not in work.columns:
+        work["distance_km"] = work["anchor_distance_km"]
+    work = work.sort_values(["anchor_distance_km", "score"], ascending=[True, False])
+    return work.head(k).reset_index(drop=True)
+
+
+def _norm_score(series: pd.Series) -> pd.Series:
+    s = pd.to_numeric(series, errors="coerce").fillna(0.0).astype(float)
+    lo, hi = float(s.min()), float(s.max())
+    if hi - lo <= 1e-12:
+        return pd.Series([0.0] * len(s), index=s.index, dtype=float)
+    return (s - lo) / (hi - lo)
+
+
+def _blend_routes(
+    parts: List[Tuple[str, pd.DataFrame, float]],
+    *,
+    k: int,
+) -> pd.DataFrame:
+    """
+    Weighted blend across route variants using normalized per-variant scores.
+    Deduplicates by fsq_id and preserves representative row data.
+    """
+    agg: Dict[str, Dict[str, object]] = {}
+    for _, df, w in parts:
+        if df is None or df.empty or w <= 0:
+            continue
+        work = df.copy()
+        if "fsq_id" not in work.columns:
+            continue
+        if "score" not in work.columns:
+            work["score"] = 0.0
+        work["__s"] = _norm_score(work["score"])
+        for _, row in work.iterrows():
+            pid = str(row.get("fsq_id") or "").strip()
+            if not pid:
+                continue
+            contrib = float(w) * float(row.get("__s", 0.0))
+            entry = agg.get(pid)
+            if entry is None:
+                rowd = row.to_dict()
+                rowd.pop("__s", None)
+                agg[pid] = {"row": rowd, "blend_score": contrib}
+            else:
+                entry["blend_score"] = float(entry["blend_score"]) + contrib
+                if float(row.get("__s", 0.0)) > float(entry.get("best_local_s", -1.0)):
+                    rowd = row.to_dict()
+                    rowd.pop("__s", None)
+                    entry["row"] = rowd
+                entry["best_local_s"] = max(float(entry.get("best_local_s", -1.0)), float(row.get("__s", 0.0)))
+
+    if not agg:
+        return pd.DataFrame()
+
+    rows = []
+    for val in agg.values():
+        row = dict(val["row"])
+        row["score"] = float(val["blend_score"])
+        rows.append(row)
+    out = pd.DataFrame(rows).sort_values("score", ascending=False)
+    return out.head(int(k)).reset_index(drop=True)
+
+
 def build_multi_routes(
     *,
     dsn: Optional[str] = None,
@@ -214,8 +312,8 @@ def build_multi_routes(
 
     # 2) inputs route: inputs dominant, isolated from history.
     if inputs_present:
-        k_candidates = int(max(k * 4, min(100, k + 20)))
-        df = recommend(
+        k_candidates = int(max(k * 6, min(300, k + 60)))
+        df_soft = recommend(
             dsn=dsn,
             city=city,
             city_qid=city_qid,
@@ -236,6 +334,43 @@ def build_multi_routes(
             distance_weight=0.0,
             diversify=True,
         )
+
+        # Second pass (strict) to increase chance of including explicit user categories/intents.
+        df_strict = pd.DataFrame()
+        if prefs is not None and prefs.categories:
+            strict_prefs = Prefs(
+                categories=list(prefs.categories),
+                free_only=prefs.free_only,
+                max_price_tier=prefs.max_price_tier,
+                category_mode="strict",
+            )
+            strict_k = int(max(k * 12, 400))
+            df_strict = recommend(
+                dsn=dsn,
+                city=city,
+                city_qid=city_qid,
+                user_id=None,
+                current_poi=None,
+                k=strict_k,
+                visits_limit=visits_limit,
+                mode="content",
+                use_embeddings=False,
+                embeddings_path=embeddings_path,
+                use_als=False,
+                als_path=als_path,
+                lat=None,
+                lon=None,
+                max_price_tier=max_price_tier,
+                free_only=free_only,
+                prefs=strict_prefs,
+                distance_weight=0.0,
+                diversify=True,
+            )
+
+        df = pd.concat([df_strict, df_soft], ignore_index=True)
+        if not df.empty and "fsq_id" in df.columns:
+            df = df.drop_duplicates(subset=["fsq_id"], keep="first").reset_index(drop=True)
+
         if df.empty:
             omitted["inputs"] = "empty_result"
         else:
@@ -245,16 +380,17 @@ def build_multi_routes(
 
     # 3) location route: location dominant, independent from history.
     if location_present:
+        k_candidates = int(max(k * 6, min(150, k + 30)))
         df = recommend(
             dsn=dsn,
             city=city,
             city_qid=city_qid,
             user_id=None,
-            current_poi=current_poi,
-            k=k,
+            current_poi=None,
+            k=k_candidates,
             visits_limit=visits_limit,
             mode="hybrid",
-            use_embeddings=use_embeddings,
+            use_embeddings=False,
             embeddings_path=embeddings_path,
             use_als=False,
             als_path=als_path,
@@ -269,7 +405,7 @@ def build_multi_routes(
         if df.empty:
             omitted["location"] = "empty_result"
         else:
-            routes["location"] = df
+            routes["location"] = _trim_location_nearest(df=df, lat=lat, lon=lon, k=k)
     else:
         omitted["location"] = "missing_location"
 
@@ -300,6 +436,21 @@ def build_multi_routes(
         distance_weight=0.35 if location_present else 0.0,
         diversify=True,
     )
+
+    # Prevent "full" collapsing into a copy of "location" when several signals exist.
+    blend_parts: List[Tuple[str, pd.DataFrame, float]] = []
+    if history_present and "history" in routes:
+        blend_parts.append(("history", routes["history"], 0.45 if (inputs_present and location_present) else 0.65))
+    if inputs_present and "inputs" in routes:
+        blend_parts.append(("inputs", routes["inputs"], 0.35 if (history_present and location_present) else 0.55))
+    if location_present and "location" in routes:
+        blend_parts.append(("location", routes["location"], 0.20 if (history_present and inputs_present) else 0.35))
+
+    if len(blend_parts) >= 2:
+        blended = _blend_routes(blend_parts, k=k)
+        if not blended.empty:
+            df = blended
+
     if df.empty:
         omitted["full"] = "empty_result"
     else:
