@@ -68,6 +68,7 @@ class MultiRecommendRequest(BaseModel):
     use_als: bool = False
     als_path: Optional[str] = "src/recommender/cache/als_model.joblib"
     build_route: bool = False
+    prioritize_proximity: bool = False
 
 
 def _to_jsonable(value: Any) -> Any:
@@ -241,6 +242,7 @@ def multi_recommend_endpoint(req: MultiRecommendRequest) -> Dict[str, Any]:
             embeddings_path=req.embeddings_path,
             use_als=req.use_als,
             als_path=req.als_path,
+            prioritize_proximity=req.prioritize_proximity,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

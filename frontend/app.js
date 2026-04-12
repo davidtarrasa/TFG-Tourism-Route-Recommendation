@@ -170,6 +170,7 @@ function buildPayload() {
     als_path: `src/recommender/cache/als_${cityQid.toLowerCase()}.joblib`,
     visits_limit: 10000,
     build_route: true,
+    prioritize_proximity: proximity,
     _prefer_location: proximity,
   };
 }

@@ -509,6 +509,12 @@ fieldset {
   margin-top: 0.6rem;
 }
 
+.saved-actions {
+  display: inline-flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
 .saved-item {
   border: 1px solid #d4e1f0;
   border-radius: 10px;

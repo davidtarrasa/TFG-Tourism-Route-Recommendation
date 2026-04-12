@@ -124,9 +124,6 @@
                   <button id="save-btn" class="btn btn--ghost" type="button" disabled>
                     Guardar
                   </button>
-                  <button id="reset-saved-btn" class="btn btn--ghost" type="button">
-                    Reset guardados
-                  </button>
                 </div>
               </form>
 
@@ -175,7 +172,10 @@
           <div class="saved-routes card">
             <div class="card__header">
               <h3>Rutas guardadas</h3>
-              <button id="refresh-saved-btn" class="btn btn--ghost" type="button">Refrescar</button>
+              <div class="saved-actions">
+                <button id="refresh-saved-btn" class="btn btn--ghost" type="button">Refrescar</button>
+                <button id="reset-saved-btn" class="btn btn--ghost" type="button">Borrar guardadas</button>
+              </div>
             </div>
             <div id="saved-routes-list" class="saved-routes-list"></div>
           </div>

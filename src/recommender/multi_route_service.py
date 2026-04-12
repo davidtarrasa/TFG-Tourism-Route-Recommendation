@@ -177,8 +177,43 @@ def _trim_location_nearest(df: pd.DataFrame, lat: Optional[float], lon: Optional
     work["anchor_distance_km"] = work.apply(_dist, axis=1)
     if "distance_km" not in work.columns:
         work["distance_km"] = work["anchor_distance_km"]
-    work = work.sort_values(["anchor_distance_km", "score"], ascending=[True, False])
-    return work.head(k).reset_index(drop=True)
+
+    # Location route policy:
+    # - prefer very close POIs first
+    # - only expand radius if we cannot fill k
+    # This keeps location route clearly local around the start point.
+    ring_km = [1.2, 2.0, 3.0, 5.0, 8.0]
+    selected_parts: List[pd.DataFrame] = []
+    selected_ids = set()
+
+    for r in ring_km:
+        part = work[work["anchor_distance_km"] <= float(r)].copy()
+        if part.empty:
+            continue
+        part = part.sort_values(["anchor_distance_km", "score"], ascending=[True, False])
+        if selected_ids:
+            part = part[~part["fsq_id"].astype(str).isin(selected_ids)]
+        if part.empty:
+            continue
+        selected_parts.append(part)
+        selected_ids.update(part["fsq_id"].astype(str).tolist())
+        if sum(len(x) for x in selected_parts) >= int(k):
+            break
+
+    if selected_parts:
+        out = pd.concat(selected_parts, ignore_index=True)
+    else:
+        out = work.copy()
+
+    # If even with the widest ring we still have <k, fill by nearest overall.
+    if len(out) < int(k):
+        extra = work.sort_values(["anchor_distance_km", "score"], ascending=[True, False]).copy()
+        extra = extra[~extra["fsq_id"].astype(str).isin(set(out["fsq_id"].astype(str).tolist()))]
+        if not extra.empty:
+            out = pd.concat([out, extra], ignore_index=True)
+
+    out = out.sort_values(["anchor_distance_km", "score"], ascending=[True, False])
+    return out.head(int(k)).reset_index(drop=True)
 
 
 def _norm_score(series: pd.Series) -> pd.Series:
@@ -256,6 +291,7 @@ def build_multi_routes(
     embeddings_path: Optional[str] = None,
     use_als: bool = False,
     als_path: Optional[str] = None,
+    prioritize_proximity: bool = False,
 ) -> MultiRouteResult:
     # "location" signal means explicit geographic start from request lat/lon.
     # current_poi can still be used as contextual sequence signal, but does not
@@ -415,6 +451,10 @@ def build_multi_routes(
         # If only inputs exist, keep full aligned with input-dominant behavior.
         full_mode = "content"
 
+    full_distance_weight = 0.0
+    if location_present:
+        full_distance_weight = 0.6 if prioritize_proximity else 0.35
+
     df = recommend(
         dsn=dsn,
         city=city,
@@ -433,18 +473,27 @@ def build_multi_routes(
         max_price_tier=max_price_tier if inputs_present else None,
         free_only=free_only if inputs_present else False,
         prefs=prefs if inputs_present else None,
-        distance_weight=0.35 if location_present else 0.0,
+        distance_weight=full_distance_weight,
         diversify=True,
     )
 
     # Prevent "full" collapsing into a copy of "location" when several signals exist.
     blend_parts: List[Tuple[str, pd.DataFrame, float]] = []
     if history_present and "history" in routes:
-        blend_parts.append(("history", routes["history"], 0.45 if (inputs_present and location_present) else 0.65))
+        hist_w = 0.45 if (inputs_present and location_present) else 0.65
+        if prioritize_proximity and location_present:
+            hist_w *= 0.85
+        blend_parts.append(("history", routes["history"], hist_w))
     if inputs_present and "inputs" in routes:
-        blend_parts.append(("inputs", routes["inputs"], 0.35 if (history_present and location_present) else 0.55))
+        inp_w = 0.35 if (history_present and location_present) else 0.55
+        if prioritize_proximity and location_present:
+            inp_w *= 0.9
+        blend_parts.append(("inputs", routes["inputs"], inp_w))
     if location_present and "location" in routes:
-        blend_parts.append(("location", routes["location"], 0.20 if (history_present and inputs_present) else 0.35))
+        loc_w = 0.20 if (history_present and inputs_present) else 0.35
+        if prioritize_proximity:
+            loc_w *= 1.75
+        blend_parts.append(("location", routes["location"], loc_w))
 
     if len(blend_parts) >= 2:
         blended = _blend_routes(blend_parts, k=k)
