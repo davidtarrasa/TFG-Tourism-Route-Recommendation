@@ -97,11 +97,27 @@ def _ensure_latlon(
 ) -> pd.DataFrame:
     if df.empty:
         return df
-    if "lat" in df.columns and "lon" in df.columns:
+    has_latlon_cols = ("lat" in df.columns and "lon" in df.columns)
+    need_fill = (not has_latlon_cols) or bool(df["lat"].isna().any()) or bool(df["lon"].isna().any())
+    if not need_fill:
         return df
+
     conn = get_conn(dsn)
     pois = load_pois(conn, city=city, city_qid=city_qid)
-    return df.merge(pois[["fsq_id", "lat", "lon"]], on="fsq_id", how="left")
+    pois_xy = pois[["fsq_id", "lat", "lon"]].drop_duplicates(subset=["fsq_id"])
+
+    if not has_latlon_cols:
+        return df.merge(pois_xy, on="fsq_id", how="left")
+
+    merged = df.merge(
+        pois_xy.rename(columns={"lat": "lat_ref", "lon": "lon_ref"}),
+        on="fsq_id",
+        how="left",
+    )
+    merged["lat"] = merged["lat"].fillna(merged["lat_ref"])
+    merged["lon"] = merged["lon"].fillna(merged["lon_ref"])
+    merged = merged.drop(columns=["lat_ref", "lon_ref"], errors="ignore")
+    return merged
 
 
 def _route_payload(
@@ -114,6 +130,7 @@ def _route_payload(
     lon: Optional[float],
 ) -> Dict[str, Any]:
     with_coords = _ensure_latlon(df, dsn=dsn, city=city, city_qid=city_qid)
+    with_coords = with_coords.dropna(subset=["lat", "lon"], how="any").reset_index(drop=True)
     rr = build_route(with_coords, anchor_lat=lat, anchor_lon=lon)
     return {
         "total_km": float(rr.total_km),

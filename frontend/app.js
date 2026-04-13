@@ -1,4 +1,4 @@
-const CITY_META = {
+﻿const CITY_META = {
   Q35765: { name: "Osaka", center: [34.6937, 135.5023] },
   Q406: { name: "Istanbul", center: [41.0082, 28.9784] },
   Q864965: { name: "Petaling Jaya", center: [3.1073, 101.6067] },
@@ -16,6 +16,14 @@ function apiBaseUrl() {
 
 function parseCoord(value) {
   if (value == null) return null;
+  const s = String(value).trim().replace(",", ".");
+  if (!s) return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+
+function parseCoordLoose(value) {
+  if (value === null || value === undefined) return null;
   const s = String(value).trim().replace(",", ".");
   if (!s) return null;
   const n = Number(s);
@@ -208,15 +216,19 @@ function withLegDistances(pois) {
     if (Number.isFinite(Number(poi.distance_km))) return poi;
     if (i === 0) return { ...poi, distance_km: null, leg_distance_km: null };
     const prev = pois[i - 1];
+    const prevLat = parseCoordLoose(prev?.lat);
+    const prevLon = parseCoordLoose(prev?.lon);
+    const lat = parseCoordLoose(poi?.lat);
+    const lon = parseCoordLoose(poi?.lon);
     const ok =
-      Number.isFinite(Number(prev?.lat)) &&
-      Number.isFinite(Number(prev?.lon)) &&
-      Number.isFinite(Number(poi.lat)) &&
-      Number.isFinite(Number(poi.lon));
+      prevLat != null &&
+      prevLon != null &&
+      lat != null &&
+      lon != null;
     if (!ok) return { ...poi, distance_km: null, leg_distance_km: null };
     return {
       ...poi,
-      leg_distance_km: haversineKm(Number(prev.lat), Number(prev.lon), Number(poi.lat), Number(poi.lon)),
+      leg_distance_km: haversineKm(prevLat, prevLon, lat, lon),
     };
   });
 }
@@ -332,8 +344,13 @@ function renderMap(pois, cityName, variant) {
     return;
   }
   const latlngs = pois
-    .filter((p) => Number.isFinite(Number(p.lat)) && Number.isFinite(Number(p.lon)))
-    .map((p) => [Number(p.lat), Number(p.lon)]);
+    .map((p) => {
+      const lat = parseCoordLoose(p?.lat);
+      const lon = parseCoordLoose(p?.lon);
+      if (lat == null || lon == null) return null;
+      return [lat, lon];
+    })
+    .filter((p) => p !== null);
   if (!latlngs.length) {
     mapCaption.textContent = "Sin coordenadas disponibles en esta variante";
     if (routeLegend) {
@@ -377,20 +394,22 @@ function renderMap(pois, cityName, variant) {
   renderLegend(latlngs);
 
   pois.forEach((poi) => {
-    if (!Number.isFinite(Number(poi.lat)) || !Number.isFinite(Number(poi.lon))) return;
+    const lat = parseCoordLoose(poi?.lat);
+    const lon = parseCoordLoose(poi?.lon);
+    if (lat == null || lon == null) return;
     const icon = L.divIcon({
       className: "order-badge",
       html: `<div style="width:24px;height:24px;border-radius:50%;background:#0b3d91;color:#fff;font-size:12px;font-weight:700;line-height:24px;text-align:center;border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.45);">${poi.order}</div>`,
       iconSize: [24, 24],
       iconAnchor: [12, 12],
     });
-    const marker = L.marker([Number(poi.lat), Number(poi.lon)], { icon }).addTo(markersLayer);
+    const marker = L.marker([lat, lon], { icon }).addTo(markersLayer);
     marker.bindTooltip(`${poi.order}. ${poi.name}`, { direction: "top" });
     marker.bindPopup(
-      `<strong>${poi.order}. ${poi.name}</strong><br/>${poi.primary_category || "N/A"} · Rating: ${poi.rating ?? "N/A"}`
+      `<strong>${poi.order}. ${poi.name}</strong><br/>${poi.primary_category || "N/A"} Â· Rating: ${poi.rating ?? "N/A"}`
     );
   });
-  mapCaption.textContent = `${cityName} · ${VARIANT_LABEL[variant] || variant} · ${pois.length} paradas`;
+  mapCaption.textContent = `${cityName} Â· ${VARIANT_LABEL[variant] || variant} Â· ${pois.length} paradas`;
 }
 
 function renderList(pois, city, source, routeType) {
@@ -399,7 +418,7 @@ function renderList(pois, city, source, routeType) {
     resultMeta.textContent = "Sin resultados";
     return;
   }
-  resultMeta.textContent = `${city} · ruta ${routeType} · fuente: ${source}`;
+  resultMeta.textContent = `${city} Â· ruta ${routeType} Â· fuente: ${source}`;
   pois.forEach((poi) => {
     const dist = Number.isFinite(Number(poi.distance_km))
       ? Number(poi.distance_km)
@@ -411,7 +430,7 @@ function renderList(pois, city, source, routeType) {
     item.innerHTML = `
       <h4>${poi.order}. ${poi.name}</h4>
       <div class="poi-meta">
-        <span>Categoría: ${poi.primary_category ?? "N/A"}</span>
+        <span>CategorÃ­a: ${poi.primary_category ?? "N/A"}</span>
         <span>Rating: ${poi.rating ?? "N/A"}</span>
         <span>Distancia: ${dist == null ? "N/A" : dist.toFixed(2)} km</span>
       </div>
@@ -494,8 +513,8 @@ function renderSavedRoutes(items, source) {
     const row = document.createElement("article");
     row.className = "saved-item";
     row.innerHTML = `
-      <h5>${routeType} · ${city}</h5>
-      <p>user: ${user} · ${String(created).replace("T", " ").slice(0, 19)} · fuente: ${source}</p>
+      <h5>${routeType} Â· ${city}</h5>
+      <p>user: ${user} Â· ${String(created).replace("T", " ").slice(0, 19)} Â· fuente: ${source}</p>
     `;
     savedRoutesList.appendChild(row);
   });
@@ -565,7 +584,7 @@ function saveCurrentResult() {
   };
   prev.push(item);
   localStorage.setItem(key, JSON.stringify(prev));
-  setInfo(`Ruta guardada en localStorage (${prev.length} guardadas). Guardando también en backend...`);
+  setInfo(`Ruta guardada en localStorage (${prev.length} guardadas). Guardando tambiÃ©n en backend...`);
   saveCurrentResultToBackend(item).catch((err) => {
     setInfo(`Guardado local OK. Backend save fallo: ${err.message}`);
   });
@@ -589,7 +608,7 @@ function onFullscreenChanged() {
 }
 
 async function resetSavedRoutes() {
-  const ok = window.confirm("¿Borrar rutas guardadas? Se limpiara localStorage y backend (si esta disponible).");
+  const ok = window.confirm("Â¿Borrar rutas guardadas? Se limpiara localStorage y backend (si esta disponible).");
   if (!ok) return;
   localStorage.removeItem("tfg_saved_routes");
 
@@ -746,10 +765,17 @@ form.addEventListener("submit", async (event) => {
   };
   exportBtn.disabled = false;
   saveBtn.disabled = false;
-  if (warning) setInfo(warning);
+  const notices = [];
+  if (warning) notices.push(String(warning));
   if (Array.isArray(data?.warnings) && data.warnings.length) {
-    setInfo(`${warning ? `${warning} · ` : ""}${data.warnings.join(" | ")}`);
+    notices.push(...data.warnings.map((w) => String(w)));
   }
+  if (data?.omitted?.history === "user_without_history") {
+    notices.push("No se desplegó la ruta history: el usuario no tiene rutas previas en esta ciudad.");
+  } else if (data?.omitted?.history) {
+    notices.push(`No se desplegó la ruta history: ${String(data.omitted.history)}.`);
+  }
+  setInfo(notices.length ? notices.join(" | ") : "");
   renderSelectedVariant(source);
   setLoading(false);
 });
@@ -759,3 +785,4 @@ applyCityCenter(cityInput.value, true);
 setTimeout(() => applyCityCenter(cityInput.value, true), 0);
 window.addEventListener("pageshow", () => applyCityCenter(cityInput.value, true));
 loadSavedRoutes().catch(() => {});
+

@@ -107,8 +107,15 @@ def build_route(df: pd.DataFrame, anchor_lat: Optional[float] = None, anchor_lon
     if df.empty:
         return RouteResult(df, 0.0)
 
-    coords = df[["lat", "lon"]].astype(float).to_numpy()
-    labels = list(range(len(df)))
+    # Defensive cleanup: route ordering requires valid coordinates.
+    # Keep only rows with lat/lon present and finite to avoid NaN distances.
+    work_df = df.copy()
+    work_df = work_df.dropna(subset=["lat", "lon"], how="any").reset_index(drop=True)
+    if work_df.empty:
+        return RouteResult(work_df, 0.0)
+
+    coords = work_df[["lat", "lon"]].astype(float).to_numpy()
+    labels = list(range(len(work_df)))
 
     # Insertar ancla virtual
     if anchor_lat is not None and anchor_lon is not None:
@@ -135,7 +142,7 @@ def build_route(df: pd.DataFrame, anchor_lat: Optional[float] = None, anchor_lon
     # Si hay ancla, quitarla del orden
     order_labels = [labels[idx] for idx in order if labels[idx] != -1]
 
-    ordered_df = df.iloc[order_labels].reset_index(drop=True)
+    ordered_df = work_df.iloc[order_labels].reset_index(drop=True)
 
     # Total length must be computed using the true coordinate indices returned by `order`
     # (including the virtual anchor if present). A remapping approach can produce incorrect totals.

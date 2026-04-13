@@ -165,55 +165,93 @@ def _trim_location_nearest(df: pd.DataFrame, lat: Optional[float], lon: Optional
         return df.head(k).reset_index(drop=True)
 
     work = df.copy()
+    work = work.dropna(subset=["fsq_id", "lat", "lon"], how="any").reset_index(drop=True)
+    if work.empty:
+        return work
 
-    def _dist(row: pd.Series) -> float:
-        try:
-            la = float(row.get("lat"))
-            lo = float(row.get("lon"))
-        except Exception:
-            return float("inf")
-        return _haversine_km(float(lat), float(lon), la, lo)
+    work["lat"] = pd.to_numeric(work["lat"], errors="coerce")
+    work["lon"] = pd.to_numeric(work["lon"], errors="coerce")
+    work["score"] = pd.to_numeric(work.get("score", 0.0), errors="coerce").fillna(0.0)
+    work = work.dropna(subset=["lat", "lon"], how="any").reset_index(drop=True)
+    if work.empty:
+        return work
 
-    work["anchor_distance_km"] = work.apply(_dist, axis=1)
-    if "distance_km" not in work.columns:
-        work["distance_km"] = work["anchor_distance_km"]
+    # Anchor distance for all candidates.
+    work["anchor_distance_km"] = work.apply(
+        lambda r: _haversine_km(float(lat), float(lon), float(r["lat"]), float(r["lon"])),
+        axis=1,
+    )
+    work["distance_km"] = work["anchor_distance_km"]
 
-    # Location route policy:
-    # - prefer very close POIs first
-    # - only expand radius if we cannot fill k
-    # This keeps location route clearly local around the start point.
-    ring_km = [1.2, 2.0, 3.0, 5.0, 8.0]
-    selected_parts: List[pd.DataFrame] = []
-    selected_ids = set()
+    # Keep a generous search radius, but avoid absurd outliers.
+    work = work[work["anchor_distance_km"] <= 18.0].copy()
+    if work.empty:
+        return df.head(k).reset_index(drop=True)
 
-    for r in ring_km:
-        part = work[work["anchor_distance_km"] <= float(r)].copy()
-        if part.empty:
-            continue
-        part = part.sort_values(["anchor_distance_km", "score"], ascending=[True, False])
-        if selected_ids:
-            part = part[~part["fsq_id"].astype(str).isin(selected_ids)]
-        if part.empty:
-            continue
-        selected_parts.append(part)
-        selected_ids.update(part["fsq_id"].astype(str).tolist())
-        if sum(len(x) for x in selected_parts) >= int(k):
-            break
-
-    if selected_parts:
-        out = pd.concat(selected_parts, ignore_index=True)
+    # Normalize model score for combination with geographic terms.
+    smin = float(work["score"].min())
+    smax = float(work["score"].max())
+    if smax - smin <= 1e-12:
+        work["model_norm"] = 0.0
     else:
-        out = work.copy()
+        work["model_norm"] = (work["score"] - smin) / (smax - smin)
 
-    # If even with the widest ring we still have <k, fill by nearest overall.
-    if len(out) < int(k):
-        extra = work.sort_values(["anchor_distance_km", "score"], ascending=[True, False]).copy()
-        extra = extra[~extra["fsq_id"].astype(str).isin(set(out["fsq_id"].astype(str).tolist()))]
-        if not extra.empty:
-            out = pd.concat([out, extra], ignore_index=True)
+    def _anchor_pref(d: float) -> float:
+        # Still favors near anchor, but not as hard as before.
+        return 1.0 / (1.0 + (d / 2.8))
 
-    out = out.sort_values(["anchor_distance_km", "score"], ascending=[True, False])
-    return out.head(int(k)).reset_index(drop=True)
+    def _leg_pref(d: float) -> float:
+        # Prefer usable route legs (not too tiny, not huge jumps).
+        target = 1.4
+        sigma = 0.95
+        base = float(pow(2.718281828, -((d - target) ** 2) / (2.0 * sigma * sigma)))
+        if d < 0.25:
+            base *= 0.15
+        elif d < 0.45:
+            base *= 0.55
+        if d > 5.5:
+            base *= 0.5
+        return base
+
+    # Pick first point: model + proximity to anchor.
+    work["first_score"] = 0.62 * work["model_norm"] + 0.38 * work["anchor_distance_km"].apply(_anchor_pref)
+    selected_idx: List[int] = []
+    used = set()
+    first_idx = int(work["first_score"].idxmax())
+    selected_idx.append(first_idx)
+    used.add(str(work.loc[first_idx, "fsq_id"]))
+
+    # Sequentially grow route with model + anchor + leg coherence + light diversity.
+    while len(selected_idx) < int(k):
+        prev = work.loc[selected_idx[-1]]
+        prev_cat = str(prev.get("primary_category") or "").strip().lower()
+        best_idx = None
+        best_score = -1e9
+
+        for idx, row in work.iterrows():
+            fid = str(row.get("fsq_id") or "")
+            if not fid or fid in used:
+                continue
+            leg_km = _haversine_km(float(prev["lat"]), float(prev["lon"]), float(row["lat"]), float(row["lon"]))
+            m = float(row["model_norm"])
+            a = _anchor_pref(float(row["anchor_distance_km"]))
+            l = _leg_pref(float(leg_km))
+            row_cat = str(row.get("primary_category") or "").strip().lower()
+            cat_bonus = 0.05 if row_cat and row_cat != prev_cat else 0.0
+            total = (0.58 * m) + (0.17 * a) + (0.20 * l) + cat_bonus
+            if total > best_score:
+                best_score = total
+                best_idx = int(idx)
+
+        if best_idx is None:
+            break
+        selected_idx.append(best_idx)
+        used.add(str(work.loc[best_idx, "fsq_id"]))
+
+    out = work.loc[selected_idx].copy()
+    out = out.sort_values("first_score", ascending=False).head(int(k)) if len(out) < int(k) else out.head(int(k))
+    out = out.reset_index(drop=True)
+    return out
 
 
 def _norm_score(series: pd.Series) -> pd.Series:
@@ -416,26 +454,26 @@ def build_multi_routes(
 
     # 3) location route: location dominant, independent from history.
     if location_present:
-        k_candidates = int(max(k * 6, min(150, k + 30)))
+        k_candidates = int(max(k * 18, 500))
         df = recommend(
             dsn=dsn,
             city=city,
             city_qid=city_qid,
-            user_id=None,
-            current_poi=None,
+            user_id=user_id if history_present else None,
+            current_poi=current_poi,
             k=k_candidates,
             visits_limit=visits_limit,
             mode="hybrid",
-            use_embeddings=False,
+            use_embeddings=use_embeddings,
             embeddings_path=embeddings_path,
-            use_als=False,
+            use_als=use_als if history_present else False,
             als_path=als_path,
             lat=lat,
             lon=lon,
             max_price_tier=None,
             free_only=False,
             prefs=None,
-            distance_weight=0.9,
+            distance_weight=0.12,
             diversify=True,
         )
         if df.empty:
