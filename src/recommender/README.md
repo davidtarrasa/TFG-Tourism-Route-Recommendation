@@ -1,111 +1,221 @@
-﻿Nota de producto
-----------------
-- La CLI se usa para desarrollo, validacion y experimentacion interna.
-- En la version de consumo (web/app), el usuario final no introducira comandos: toda la interaccion sera mediante interfaz.
-- Configuracion por ciudad: si existe `configs/recommender_<city_qid>.toml`, se carga automaticamente; si no, se usa `configs/recommender.toml`.
+Product note
+------------
 
-Metodologia del recomendador (version CLI)
-==========================================
+- CLI tools are for development, debugging, and reproducible experiments.
+- Final end-user interaction is expected through web/app UI, not command lines.
+- Config is city-aware: if `configs/recommender_<city_qid>.toml` exists, it is auto-loaded.
 
-Objetivo
---------
-Recomendar y secuenciar POIs para usuarios (registrados o nuevos) usando datos en Postgres (`visits`, `pois`, `poi_categories`).
+What this module does
+---------------------
 
-Entradas esperadas (CLI/API)
-----------------------------
-- `--user-id`: opcional. Si existe en `visits`, habilita personalizacion por historial.
-- `--city` o `--city-qid`: filtra candidatos por ciudad.
-- Preferencias: `--prefs`, precio (`max_price_tier`), gratis (`free_only`), numero de paradas (`--k`), ubicacion (`--lat --lon`) o `--current-poi`.
-- Modo: `--mode hybrid|markov|content|item|embed|als`.
+`src/recommender/` contains the complete recommendation stack:
 
-`--prefs` (formato)
+1. Data access and feature preparation (`utils_db.py`, `features/`)
+2. Model scoring engines (`models/`)
+3. Score fusion and reranking (`scorer.py`)
+4. Route construction and map export (`route_planner.py`, `route_builder.py`)
+5. Multi-route product contract (`multi_route_service.py`, `multi_route_cli.py`)
+6. API integration layer (`api.py`)
+7. Training and tuning scripts (`train_*`, `tune_*`)
+
+Core data sources
+-----------------
+
+- `visits`: user trajectories/check-ins (trail_id, user_id, venue_id, timestamp, city_qid)
+- `pois`: POI metadata (coords, rating, price, primary_category, city/city_qid)
+- `poi_categories`: full category taxonomy per POI
+
+Recommendation engines
+----------------------
+
+- `content`: TF-IDF category profile matching
+- `item`: co-visitation similarity (item-item)
+- `markov`: sequential transition likelihood (POI->POI, with order-2 support)
+- `embed`: Word2Vec sequence neighbors
+- `als`: implicit collaborative filtering
+- `hybrid`: weighted combination of all available signals
+
+Main scoring pipeline (`scorer.py`)
+-----------------------------------
+
+Per request:
+
+1. Build candidate pool in selected city.
+2. Compute active engine scores (depends on available signals/artifacts).
+3. Normalize and combine scores using config weights.
+4. Apply business reranking:
+   - distance
+   - price/free filters
+   - user preferences (`prefs`)
+   - category intent boost/strict filtering
+   - diversity controls
+5. Return top-K POIs with score and metadata.
+
+Preference handling
 -------------------
-Cadena separada por comas:
-- keywords: `free|paid|cheap|mid|expensive|price:N|max_price:N`
-- otros tokens: se interpretan como preferencias de categoria/intencion.
 
-Fuentes de datos y features
----------------------------
-- POIs (`pois`): lat, lon, city, rating, price_tier, is_free, primary_category.
-- Visitas (`visits`): trail_id, user_id, venue_id, venue_city, timestamp.
-- Features:
-  - TF-IDF de categorias (content)
-  - Co-visitas POI-POI (item)
-  - Transiciones Markov POI->POI y categoria->categoria
-  - Embeddings secuenciales (Word2Vec)
-  - ALS implicito (usuario-POI)
+`prefs` can contain:
 
-Motores de recomendacion
-------------------------
-- `content`: similitud por categorias
-- `item`: co-visitas
-- `markov`: siguiente POI por transicion
-- `embed`: vecinos secuenciales por embeddings
-- `als`: collaborative filtering implicito
-- `hybrid`: fusion ponderada de senales
+- category-like tokens (museum, sport, cafe, etc.)
+- pricing/free keywords (`free`, `cheap`, `max_price:2`, etc.)
 
-Orquestacion y scoring (`scorer.py`)
+Category intents layer (`category_intents.py`):
+
+- maps noisy raw categories into compact intent groups
+- supports:
+  - `soft` mode: boost preferred intents/categories
+  - `strict` mode: hard filter by preferred intents/categories
+
+Diagnostics:
+
+- `data/reports/diagnostics/category_intent_coverage_summary.csv`
+- `data/reports/diagnostics/category_intent_full_mapping.csv`
+
+Route generation
+----------------
+
+Two stages are used:
+
+1. Selection stage (`route_planner.py`)
+   - choose coherent POI subset with leg constraints and soft diversity
+2. Ordering/render stage (`route_builder.py`)
+   - NN + 2-opt ordering
+   - GeoJSON export
+   - Folium HTML map
+   - optional road path per leg (Geoapify key if present, fallback OSRM, fallback straight edge)
+
+Map rendering capabilities (current)
 ------------------------------------
-1. Construccion de candidatos.
-2. Calculo de score por motor.
-3. Normalizacion y fusion de scores.
-4. Re-ranking por distancia, precio/gratis, diversidad y preferencias.
-5. Seleccion top-K.
-6. Orden de ruta con heuristica de planificador.
 
-Categorias generales (intents)
-------------------------------
-- Capa de mapeo de categorias ruidosas a intents compactos (`category_intents.py`).
-- Dos modos:
-  - `soft`: boost por match de categoria/intencion.
-  - `strict`: filtro duro por categoria/intencion.
-- Diagnosticos:
-  - `data/reports/diagnostics/category_intent_coverage_summary.csv`
-  - `data/reports/diagnostics/category_intent_full_mapping.csv`
+- numbered route markers
+- straight dashed edges
+- road route overlay by segment
+- segment color cascade
+- layer toggles and legend in exported HTML
+- basemap switch (satellite/light) in exported HTML
 
-Contrato multi-ruta por request
---------------------------------
-Rutas posibles:
-- `history`: domina historial
-- `inputs`: dominan preferencias de usuario
-- `location`: domina cercania geografica
-- `full`: combina todo lo disponible
+CLI entry points
+----------------
 
-Reglas:
-- Si falta una senal, no debe contaminar otras rutas.
-- Para usuario nuevo (sin historial), no se genera `history`.
-- `full` se genera cuando hay suficientes senales para combinar.
+Single-route CLI:
 
-Estado actual
--------------
-- Documentado: SI
-- Implementado en API/CLI: SI (prototipo operativo)
-- Pendiente: pulido final de UX y reglas de producto para web.
+- `python -m src.recommender.cli ...`
+- supports all engine modes and optional route export
 
-Benchmark unico 3 ciudades
---------------------------
-Comando principal:
+Multi-route CLI:
+
+- `python -m src.recommender.multi_route_cli ...`
+- outputs route variants and optional per-variant maps
+
+Multi-route product contract
+----------------------------
+
+Implemented in `multi_route_service.py`.
+
+Possible variants:
+
+- `history`
+  - generated only if user has history in selected city
+  - no location and no input prefs as dominant signals
+- `inputs`
+  - generated only if inputs are present (`prefs` and/or filters)
+  - independent from user history
+  - coverage helper tries to include requested categories when feasible
+- `location`
+  - generated only when `lat/lon` are provided
+  - geo-first route logic with city radius profile
+  - sequential growth with local constraints and model tie-break signal
+- `full`
+  - combines whichever signals are available
+  - blended from active route variants when enough components exist
+
+Hard rule:
+
+- if user has no history and request has no inputs and no location -> validation error
+
+API integration
+---------------
+
+`api.py` exposes:
+
+- `POST /recommend` (single route mode)
+- `POST /multi-recommend` (contract mode)
+- `POST/GET/DELETE /saved-routes` (persistence for frontend)
+
+The API also:
+
+- fills missing lat/lon when possible
+- builds route payload (`ordered_pois`, `geojson`, `total_km`) if requested
+- returns omitted/warnings metadata for frontend UX
+
+Training scripts
+----------------
+
+- `train_embeddings.py`: Word2Vec artifact per city
+- `train_als.py`: ALS artifact per city
+
+Typical outputs:
+
+- `src/recommender/cache/word2vec_q35765.joblib`
+- `src/recommender/cache/als_q35765.joblib`
+
+Tuning scripts
+--------------
+
+Available tuners:
+
+- `tune_hybrid.py`
+- `tune_markov.py`
+- `tune_embeddings_scoring.py`
+- `tune_als.py`
+- `tune_route_planner.py`
+- `tune_all.py` (aggregated suggestions)
+
+Suggested workflow:
+
+1. baseline eval with fixed protocol/seed
+2. run tuner(s)
+3. apply config updates in city TOML
+4. retrain artifacts if training hyperparams changed
+5. rerun eval and compare under same protocol/seed
+
+Benchmark (3 cities)
+--------------------
+
+`benchmark_3cities.py` automates:
+
+- optional training (`--run-train`)
+- ranking eval (`--run-eval`)
+- route eval (`--run-routes`)
+- summary export JSON + Markdown
+
+Example:
+
 - `python -m src.recommender.benchmark_3cities --run-eval --run-routes`
 
-Opcional entrenamiento previo:
-- `python -m src.recommender.benchmark_3cities --run-train --run-eval --run-routes`
+Configuration model
+-------------------
 
-Protocolos de evaluacion
-------------------------
-Protocolo recomendado:
-- `last_trail_user`
-  - si usuario tiene 1 trail: queda en train
-  - si tiene >=2 trails y el ultimo tiene >=4 POIs: ultimo a test, resto a train
+Config loading is centralized in `config.py`:
 
-Metricas ranking principales:
-- `hit@k`
-- `precision@k`
-- `recall@k`
-- `ndcg@k`
-- `novelty`
-- `diversity`
+- global fallback: `configs/recommender.toml`
+- city override: `configs/recommender_<city_qid>.toml`
 
-Nota de inferencia
-------------------
-- Usuario registrado: se excluyen POIs ya visitados en recomendacion final.
-- Usuario nuevo: no aplica ese filtro historico.
+This controls:
+
+- hybrid weights
+- markov/embedding/als scoring knobs
+- route planner parameters
+- eval seeds/defaults
+- filter policies
+
+Key files to inspect
+--------------------
+
+- `src/recommender/scorer.py`
+- `src/recommender/multi_route_service.py`
+- `src/recommender/route_planner.py`
+- `src/recommender/route_builder.py`
+- `src/recommender/api.py`
+- `src/recommender/eval/evaluate.py`
+- `src/recommender/eval/evaluate_routes.py`
