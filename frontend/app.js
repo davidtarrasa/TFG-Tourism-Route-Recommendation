@@ -406,10 +406,10 @@ function renderMap(pois, cityName, variant) {
     const marker = L.marker([lat, lon], { icon }).addTo(markersLayer);
     marker.bindTooltip(`${poi.order}. ${poi.name}`, { direction: "top" });
     marker.bindPopup(
-      `<strong>${poi.order}. ${poi.name}</strong><br/>${poi.primary_category || "N/A"} Â· Rating: ${poi.rating ?? "N/A"}`
+      `<strong>${poi.order}. ${poi.name}</strong><br/>${poi.primary_category || "N/A"} · Rating: ${poi.rating ?? "N/A"}`
     );
   });
-  mapCaption.textContent = `${cityName} Â· ${VARIANT_LABEL[variant] || variant} Â· ${pois.length} paradas`;
+  mapCaption.textContent = `${cityName} · ${VARIANT_LABEL[variant] || variant} · ${pois.length} paradas`;
 }
 
 function renderList(pois, city, source, routeType) {
@@ -418,7 +418,7 @@ function renderList(pois, city, source, routeType) {
     resultMeta.textContent = "Sin resultados";
     return;
   }
-  resultMeta.textContent = `${city} Â· ruta ${routeType} Â· fuente: ${source}`;
+  resultMeta.textContent = `${city} · ruta ${routeType} · fuente: ${source}`;
   pois.forEach((poi) => {
     const dist = Number.isFinite(Number(poi.distance_km))
       ? Number(poi.distance_km)
@@ -430,7 +430,7 @@ function renderList(pois, city, source, routeType) {
     item.innerHTML = `
       <h4>${poi.order}. ${poi.name}</h4>
       <div class="poi-meta">
-        <span>CategorÃ­a: ${poi.primary_category ?? "N/A"}</span>
+        <span>Categoría: ${poi.primary_category ?? "N/A"}</span>
         <span>Rating: ${poi.rating ?? "N/A"}</span>
         <span>Distancia: ${dist == null ? "N/A" : dist.toFixed(2)} km</span>
       </div>
@@ -513,8 +513,8 @@ function renderSavedRoutes(items, source) {
     const row = document.createElement("article");
     row.className = "saved-item";
     row.innerHTML = `
-      <h5>${routeType} Â· ${city}</h5>
-      <p>user: ${user} Â· ${String(created).replace("T", " ").slice(0, 19)} Â· fuente: ${source}</p>
+      <h5>${routeType} · ${city}</h5>
+      <p>user: ${user} · ${String(created).replace("T", " ").slice(0, 19)} · fuente: ${source}</p>
     `;
     savedRoutesList.appendChild(row);
   });
@@ -584,7 +584,7 @@ function saveCurrentResult() {
   };
   prev.push(item);
   localStorage.setItem(key, JSON.stringify(prev));
-  setInfo(`Ruta guardada en localStorage (${prev.length} guardadas). Guardando tambiÃ©n en backend...`);
+  setInfo(`Ruta guardada en localStorage (${prev.length} guardadas). Guardando también en backend...`);
   saveCurrentResultToBackend(item).catch((err) => {
     setInfo(`Guardado local OK. Backend save fallo: ${err.message}`);
   });
@@ -608,7 +608,7 @@ function onFullscreenChanged() {
 }
 
 async function resetSavedRoutes() {
-  const ok = window.confirm("Â¿Borrar rutas guardadas? Se limpiara localStorage y backend (si esta disponible).");
+  const ok = window.confirm("¿Borrar rutas guardadas? Se limpiará localStorage y backend (si está disponible).");
   if (!ok) return;
   localStorage.removeItem("tfg_saved_routes");
 

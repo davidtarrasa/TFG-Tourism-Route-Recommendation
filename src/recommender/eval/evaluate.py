@@ -83,10 +83,10 @@ def split_train_test(visits: pd.DataFrame, test_size: int = 1, min_train: int = 
 
 def split_train_test_trails(visits: pd.DataFrame, test_size: int = 1, min_train: int = 1) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
-    Split por trail: para cada trail_id, deja las Ãºltimas `test_size` visitas como test.
+    Split por trail: para cada trail_id, deja las últimas `test_size` visitas como test.
 
-    Esto alinea mejor la evaluaciÃ³n con modelos secuenciales (Markov/Word2Vec),
-    porque el "POI actual" y el siguiente pertenecen a la misma ruta/sesiÃ³n.
+    Esto alinea mejor la evaluación con modelos secuenciales (Markov/Word2Vec),
+    porque el "POI actual" y el siguiente pertenecen a la misma ruta/sesión.
     """
     visits = visits.sort_values(["trail_id", "timestamp"])
     train_rows = []
@@ -551,7 +551,7 @@ def main():
     parser.add_argument(
         "--fair",
         action="store_true",
-        help="Entrena modelos SOLO con el split de train (mÃ¡s lento, sin fuga de informaciÃ³n).",
+        help="Entrena modelos SOLO con el split de train (más lento, sin fuga de información).",
     )
     parser.add_argument("--modes", nargs="+", default=["hybrid", "content", "item", "markov", "embed", "als"], help="Modos a evaluar")
     parser.add_argument("--output", help="Guardar resultados en JSON/CSV (según extensión)")

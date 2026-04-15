@@ -1,4 +1,4 @@
-"""
+﻿"""
 Embeddings secuenciales (p.ej., Word2Vec sobre rutas):
 - Entrena embedding de POIs con secuencias de visits.
 - Obtiene vecinos similares al historial del usuario o al POI actual.
@@ -66,7 +66,7 @@ def score_embeddings_next(model, current_poi: str, topn: int = 50) -> Dict[str, 
 
 def score_embeddings_context(model, context_items: List[str], topn: int = 50) -> Dict[str, float]:
     """
-    Score "next POI" usando un contexto (promedio de embeddings de los Ãºltimos N POIs).
+    Score "next POI" usando un contexto (promedio de embeddings de los últimos N POIs).
 
     Gensim permite pasar una lista de tokens "positive" y promedia los vectores internamente.
     """
@@ -100,3 +100,4 @@ def score_embeddings(model, user_items: List[str], topn: int = 20) -> Dict[str, 
 
 
 __all__ = ["train_embeddings", "similar_pois", "score_embeddings_next", "score_embeddings_context", "score_embeddings"]
+

@@ -73,6 +73,15 @@ PowerShell shortcuts:
 - `.\scripts\run_api.ps1`
 - `.\scripts\run_frontend.ps1`
 
+## Maintenance Cleanup
+
+Reports cleanup (keeps benchmark/diagnostics/maps and `*_latest` snapshots):
+
+```powershell
+.\scripts\clean_reports.ps1 -WhatIfOnly
+.\scripts\clean_reports.ps1
+```
+
 ### 2) CLI mode (research/debug)
 
 Single-route recommendation:
