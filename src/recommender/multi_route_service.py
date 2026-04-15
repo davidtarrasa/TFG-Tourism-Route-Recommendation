@@ -22,7 +22,7 @@ import pandas as pd
 from .category_intents import INCONCLUSIVE, classify_category_intent, infer_user_intents
 from .prefs import Prefs, normalize_categories
 from .scorer import recommend
-from .utils_db import get_conn
+from .utils_db import get_conn, load_pois
 
 
 @dataclass
@@ -151,7 +151,50 @@ def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return r * c
 
 
-def _trim_location_nearest(df: pd.DataFrame, lat: Optional[float], lon: Optional[float], k: int) -> pd.DataFrame:
+def _location_radius_profile(city_qid: Optional[str]) -> Tuple[float, float, float]:
+    """
+    Radius policy for location route:
+    - start_km: strict local radius target
+    - max_km: hard cap for gradual expansion
+    - step_km: expansion step when not enough candidates
+    """
+    qid = str(city_qid or "").strip().upper()
+    if qid in {"Q35765", "Q406"}:  # Osaka / Istanbul
+        return 1.8, 4.0, 0.40
+    if qid == "Q864965":  # Petaling Jaya (sparser spread)
+        return 2.8, 6.0, 0.50
+    return 2.0, 4.5, 0.40
+
+
+def _coalesce_latlon_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Normalize coordinate columns to canonical 'lat'/'lon'.
+    Some upstream merges may produce lat_x/lat_y, lon_x/lon_y.
+    """
+    if df is None or df.empty:
+        return df
+    work = df.copy()
+    if "lat" not in work.columns:
+        for cand in ("lat_x", "lat_y", "latitude"):
+            if cand in work.columns:
+                work["lat"] = work[cand]
+                break
+    if "lon" not in work.columns:
+        for cand in ("lon_x", "lon_y", "lng", "longitude"):
+            if cand in work.columns:
+                work["lon"] = work[cand]
+                break
+    return work
+
+
+def _trim_location_nearest(
+    df: pd.DataFrame,
+    lat: Optional[float],
+    lon: Optional[float],
+    k: int,
+    *,
+    city_qid: Optional[str] = None,
+) -> pd.DataFrame:
     """
     Make location route clearly proximity-dominant:
     - compute anchor distance for all candidates
@@ -159,6 +202,7 @@ def _trim_location_nearest(df: pd.DataFrame, lat: Optional[float], lon: Optional
     """
     if df is None or df.empty:
         return df
+    df = _coalesce_latlon_columns(df)
     if lat is None or lon is None:
         return df.head(k).reset_index(drop=True)
     if "lat" not in df.columns or "lon" not in df.columns:
@@ -183,10 +227,18 @@ def _trim_location_nearest(df: pd.DataFrame, lat: Optional[float], lon: Optional
     )
     work["distance_km"] = work["anchor_distance_km"]
 
-    # Keep a generous search radius, but avoid absurd outliers.
-    work = work[work["anchor_distance_km"] <= 18.0].copy()
-    if work.empty:
+    # Radius gating: start strict, then expand progressively only if needed.
+    # If we still do not have enough candidates after max radius, we keep the
+    # available local subset instead of pulling distant points.
+    start_km, max_km, step_km = _location_radius_profile(city_qid)
+    radius = float(start_km)
+    gated = work[work["anchor_distance_km"] <= radius].copy()
+    while len(gated) < int(k) and radius < float(max_km):
+        radius = min(float(max_km), radius + float(step_km))
+        gated = work[work["anchor_distance_km"] <= radius].copy()
+    if gated.empty:
         return df.head(k).reset_index(drop=True)
+    work = gated
 
     # Normalize model score for combination with geographic terms.
     smin = float(work["score"].min())
@@ -196,9 +248,16 @@ def _trim_location_nearest(df: pd.DataFrame, lat: Optional[float], lon: Optional
     else:
         work["model_norm"] = (work["score"] - smin) / (smax - smin)
 
+    # Explicit distance penalty from anchor (strong locality control).
+    # Larger lambda => faster score decay with distance.
+    # 3.2 intentionally makes location route hyper-local.
+    work["dist_penalty"] = work["anchor_distance_km"].apply(lambda d: float(pow(2.718281828, -3.2 * float(d))))
+    # Keep a user-facing score already locality-penalized.
+    work["score"] = work["model_norm"] * work["dist_penalty"]
+
     def _anchor_pref(d: float) -> float:
-        # Still favors near anchor, but not as hard as before.
-        return 1.0 / (1.0 + (d / 2.8))
+        # Strong near-anchor preference for strict location mode.
+        return 1.0 / (1.0 + (d / 1.4))
 
     def _leg_pref(d: float) -> float:
         # Prefer usable route legs (not too tiny, not huge jumps).
@@ -213,8 +272,8 @@ def _trim_location_nearest(df: pd.DataFrame, lat: Optional[float], lon: Optional
             base *= 0.5
         return base
 
-    # Pick first point: model + proximity to anchor.
-    work["first_score"] = 0.62 * work["model_norm"] + 0.38 * work["anchor_distance_km"].apply(_anchor_pref)
+    # Pick first point: strongly prioritize anchor proximity.
+    work["first_score"] = (0.05 * work["score"]) + (0.95 * work["anchor_distance_km"].apply(_anchor_pref))
     selected_idx: List[int] = []
     used = set()
     first_idx = int(work["first_score"].idxmax())
@@ -233,12 +292,19 @@ def _trim_location_nearest(df: pd.DataFrame, lat: Optional[float], lon: Optional
             if not fid or fid in used:
                 continue
             leg_km = _haversine_km(float(prev["lat"]), float(prev["lon"]), float(row["lat"]), float(row["lon"]))
-            m = float(row["model_norm"])
+            m = float(row["score"])  # model already decayed by anchor distance
             a = _anchor_pref(float(row["anchor_distance_km"]))
             l = _leg_pref(float(leg_km))
             row_cat = str(row.get("primary_category") or "").strip().lower()
             cat_bonus = 0.05 if row_cat and row_cat != prev_cat else 0.0
-            total = (0.58 * m) + (0.17 * a) + (0.20 * l) + cat_bonus
+            # Hyper-local route: anchor dominates; model acts as tie-breaker.
+            total = (0.05 * m) + (0.85 * a) + (0.10 * l) + cat_bonus
+            # Additional soft penalty near the current radius boundary.
+            if float(row["anchor_distance_km"]) > (0.85 * radius):
+                total *= 0.70
+            # Prevent very long hops in location-only mode.
+            if leg_km > 1.2:
+                total *= 0.20
             if total > best_score:
                 best_score = total
                 best_idx = int(idx)
@@ -249,8 +315,197 @@ def _trim_location_nearest(df: pd.DataFrame, lat: Optional[float], lon: Optional
         used.add(str(work.loc[best_idx, "fsq_id"]))
 
     out = work.loc[selected_idx].copy()
-    out = out.sort_values("first_score", ascending=False).head(int(k)) if len(out) < int(k) else out.head(int(k))
-    out = out.reset_index(drop=True)
+    if len(out) < int(k):
+        # Keep strict locality: fill only from remaining points inside radius.
+        remain = work[~work["fsq_id"].astype(str).isin(set(out["fsq_id"].astype(str)))]
+        remain = remain.sort_values(["anchor_distance_km", "score"], ascending=[True, False])
+        out = pd.concat([out, remain], ignore_index=True)
+    out = out.sort_values(["anchor_distance_km", "score"], ascending=[True, False]).head(int(k)).reset_index(drop=True)
+    return out
+
+
+def _location_leg_cap_km(city_qid: Optional[str], prioritize_proximity: bool) -> float:
+    qid = str(city_qid or "").strip().upper()
+    if qid in {"Q35765", "Q406"}:
+        return 2.2 if prioritize_proximity else 3.0
+    if qid == "Q864965":
+        return 3.2 if prioritize_proximity else 4.2
+    return 2.6 if prioritize_proximity else 3.6
+
+
+def _location_anchor_target_km(city_qid: Optional[str], prioritize_proximity: bool) -> float:
+    """
+    Preferred distance-to-anchor for location routes.
+    Helps avoid degenerate ultra-tiny clusters right on top of the anchor.
+    """
+    qid = str(city_qid or "").strip().upper()
+    if qid in {"Q35765", "Q406"}:
+        return 1.0 if prioritize_proximity else 1.6
+    if qid == "Q864965":
+        return 1.6 if prioritize_proximity else 2.4
+    return 1.2 if prioritize_proximity else 1.9
+
+
+def _build_location_route(
+    *,
+    dsn: Optional[str],
+    city: Optional[str],
+    city_qid: Optional[str],
+    user_id: Optional[int],
+    current_poi: Optional[str],
+    lat: float,
+    lon: float,
+    k: int,
+    visits_limit: Optional[int],
+    use_embeddings: bool,
+    embeddings_path: Optional[str],
+    use_als: bool,
+    als_path: Optional[str],
+    prioritize_proximity: bool,
+) -> pd.DataFrame:
+    # 1) Geo-first candidate pool from POIs in city.
+    conn = get_conn(dsn)
+    try:
+        pois = load_pois(conn, city=city, city_qid=city_qid)
+    finally:
+        conn.close()
+    if pois is None or pois.empty:
+        return pd.DataFrame()
+
+    work = _coalesce_latlon_columns(pois)
+    if "lat" not in work.columns or "lon" not in work.columns:
+        return pd.DataFrame()
+    work = work.dropna(subset=["fsq_id", "lat", "lon", "name", "primary_category"], how="any").copy()
+    if work.empty:
+        return pd.DataFrame()
+    work["lat"] = pd.to_numeric(work["lat"], errors="coerce")
+    work["lon"] = pd.to_numeric(work["lon"], errors="coerce")
+    work = work.dropna(subset=["lat", "lon"], how="any")
+    if work.empty:
+        return pd.DataFrame()
+
+    work["anchor_distance_km"] = work.apply(
+        lambda r: _haversine_km(float(lat), float(lon), float(r["lat"]), float(r["lon"])),
+        axis=1,
+    )
+    work["distance_km"] = work["anchor_distance_km"]
+
+    # 2) Hard local radius (expands only a bit; never goes far).
+    start_km, max_km, step_km = _location_radius_profile(city_qid)
+    if prioritize_proximity:
+        start_km *= 0.85
+        max_km *= 0.85
+    radius = float(start_km)
+    gated = work[work["anchor_distance_km"] <= radius].copy()
+    target_pool = int(max(k * 6, 80))
+    while len(gated) < target_pool and radius < float(max_km):
+        radius = min(float(max_km), radius + float(step_km))
+        gated = work[work["anchor_distance_km"] <= radius].copy()
+    if gated.empty:
+        return pd.DataFrame()
+    work = gated.copy()
+
+    # 3) Secondary model signal (independent from full route composition).
+    # Keep location independent from user-history personalization.
+    model_k = int(max(k * 20, 500))
+    model_df = recommend(
+        dsn=dsn,
+        city=city,
+        city_qid=city_qid,
+        user_id=None,
+        current_poi=current_poi,
+        k=model_k,
+        visits_limit=visits_limit,
+        mode="hybrid",
+        use_embeddings=use_embeddings,
+        embeddings_path=embeddings_path,
+        use_als=use_als,
+        als_path=als_path,
+        lat=None,
+        lon=None,
+        max_price_tier=None,
+        free_only=False,
+        prefs=None,
+        distance_weight=0.0,
+        diversify=True,
+    )
+    model_map: Dict[str, float] = {}
+    if model_df is not None and not model_df.empty and "fsq_id" in model_df.columns:
+        ms = model_df[["fsq_id", "score"]].copy()
+        ms["score"] = pd.to_numeric(ms["score"], errors="coerce").fillna(0.0)
+        smin, smax = float(ms["score"].min()), float(ms["score"].max())
+        if smax - smin > 1e-12:
+            ms["score_n"] = (ms["score"] - smin) / (smax - smin)
+        else:
+            ms["score_n"] = 0.0
+        model_map = {str(r["fsq_id"]): float(r["score_n"]) for _, r in ms.iterrows()}
+    work["model_norm"] = work["fsq_id"].astype(str).map(model_map).fillna(0.0).astype(float)
+
+    # Quality prior from POI metadata.
+    work["rating"] = pd.to_numeric(work.get("rating"), errors="coerce").fillna(0.0)
+    work["total_ratings"] = pd.to_numeric(work.get("total_ratings"), errors="coerce").fillna(0.0)
+    rmax = float(work["rating"].max()) if len(work) else 0.0
+    tmax = float(work["total_ratings"].max()) if len(work) else 0.0
+    work["r_norm"] = (work["rating"] / rmax) if rmax > 0 else 0.0
+    work["t_norm"] = (work["total_ratings"] / tmax) if tmax > 0 else 0.0
+    work["quality_norm"] = 0.7 * work["r_norm"] + 0.3 * work["t_norm"]
+
+    # 4) Local candidate score (geo-dominant).
+    target_km = _location_anchor_target_km(city_qid, prioritize_proximity=prioritize_proximity)
+    sigma = 0.85 if prioritize_proximity else 1.20
+    # Ring-like preference: still local, but not all points collapsed at ~0 km.
+    work["geo_pref"] = work["anchor_distance_km"].apply(
+        lambda d: float(pow(2.718281828, -((float(d) - target_km) ** 2) / (2.0 * sigma * sigma)))
+    )
+    work["local_score"] = (
+        (0.40 * work["geo_pref"]) + (0.45 * work["model_norm"]) + (0.15 * work["quality_norm"])
+    )
+
+    # 5) Greedy route build with hard local constraints.
+    leg_cap = _location_leg_cap_km(city_qid, prioritize_proximity=prioritize_proximity)
+    beta = 1.05 if prioritize_proximity else 0.80
+    selected: List[int] = []
+    used_ids = set()
+
+    first_idx = int(work["local_score"].idxmax())
+    selected.append(first_idx)
+    used_ids.add(str(work.loc[first_idx, "fsq_id"]))
+
+    while len(selected) < int(k):
+        prev = work.loc[selected[-1]]
+        prev_cat = str(prev.get("primary_category") or "").strip().lower()
+        best_idx = None
+        best_score = -1e18
+        for idx, row in work.iterrows():
+            fid = str(row.get("fsq_id") or "")
+            if not fid or fid in used_ids:
+                continue
+            d_anchor = float(row["anchor_distance_km"])
+            if d_anchor > float(radius):
+                continue
+            leg_km = _haversine_km(float(prev["lat"]), float(prev["lon"]), float(row["lat"]), float(row["lon"]))
+            if leg_km > float(leg_cap):
+                continue
+            leg_pref = float(pow(2.718281828, -beta * leg_km))
+            cat_bonus = 0.05 if str(row.get("primary_category") or "").strip().lower() != prev_cat else 0.0
+            total = (0.35 * row["geo_pref"]) + (0.20 * leg_pref) + (0.45 * row["model_norm"]) + cat_bonus
+            if total > best_score:
+                best_score = float(total)
+                best_idx = int(idx)
+        if best_idx is None:
+            break
+        selected.append(best_idx)
+        used_ids.add(str(work.loc[best_idx, "fsq_id"]))
+
+    out = work.loc[selected].copy() if selected else pd.DataFrame()
+    if out.empty:
+        return out
+    if len(out) < int(k):
+        remain = work[~work["fsq_id"].astype(str).isin(set(out["fsq_id"].astype(str)))].copy()
+        remain = remain.sort_values(["local_score", "anchor_distance_km"], ascending=[False, True])
+        out = pd.concat([out, remain.head(int(k) - len(out))], ignore_index=True)
+    out["score"] = out["local_score"]
+    out = out.sort_values(["score", "anchor_distance_km"], ascending=[False, True]).head(int(k)).reset_index(drop=True)
     return out
 
 
@@ -454,32 +709,26 @@ def build_multi_routes(
 
     # 3) location route: location dominant, independent from history.
     if location_present:
-        k_candidates = int(max(k * 18, 500))
-        df = recommend(
+        df = _build_location_route(
             dsn=dsn,
             city=city,
             city_qid=city_qid,
             user_id=user_id if history_present else None,
             current_poi=current_poi,
-            k=k_candidates,
+            lat=float(lat),
+            lon=float(lon),
+            k=int(k),
             visits_limit=visits_limit,
-            mode="hybrid",
-            use_embeddings=use_embeddings,
+            use_embeddings=False,
             embeddings_path=embeddings_path,
-            use_als=use_als if history_present else False,
+            use_als=False,
             als_path=als_path,
-            lat=lat,
-            lon=lon,
-            max_price_tier=None,
-            free_only=False,
-            prefs=None,
-            distance_weight=0.12,
-            diversify=True,
+            prioritize_proximity=prioritize_proximity,
         )
         if df.empty:
             omitted["location"] = "empty_result"
         else:
-            routes["location"] = _trim_location_nearest(df=df, lat=lat, lon=lon, k=k)
+            routes["location"] = df
     else:
         omitted["location"] = "missing_location"
 
@@ -491,7 +740,7 @@ def build_multi_routes(
 
     full_distance_weight = 0.0
     if location_present:
-        full_distance_weight = 0.6 if prioritize_proximity else 0.35
+        full_distance_weight = 0.45 if prioritize_proximity else 0.30
 
     df = recommend(
         dsn=dsn,
@@ -528,9 +777,9 @@ def build_multi_routes(
             inp_w *= 0.9
         blend_parts.append(("inputs", routes["inputs"], inp_w))
     if location_present and "location" in routes:
-        loc_w = 0.20 if (history_present and inputs_present) else 0.35
+        loc_w = 0.10 if (history_present and inputs_present) else 0.20
         if prioritize_proximity:
-            loc_w *= 1.75
+            loc_w *= 1.20
         blend_parts.append(("location", routes["location"], loc_w))
 
     if len(blend_parts) >= 2:
