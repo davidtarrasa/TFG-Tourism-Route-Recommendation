@@ -12,7 +12,7 @@ The stack is currently operational in 4 layers:
 ## Current Functional Scope
 
 - City-level operation for `Q35765` (Osaka), `Q406` (Istanbul), `Q864965` (Petaling Jaya)
-- Engines: `content`, `item`, `markov`, `embed`, `als`, `hybrid`
+- Engines: `content`, `item`, `markov`, `embed`, `als`, `hybrid`, `random` (baseline)
 - Multi-route contract in one request: `history`, `inputs`, `location`, `full`
 - Route planning + map rendering (HTML + GeoJSON), with street-path overlay
 - Saved routes API and frontend section
@@ -119,6 +119,7 @@ Implemented in `src/recommender/multi_route_service.py`.
 - `inputs`: generated from request preferences/constraints, independent from history
 - `location`: generated only when `lat/lon` is provided; geo-first logic with local radius policy
 - `full`: blended route combining available signals (history + inputs + location), not necessarily all three
+- optional soft surprise POI can be injected into `full` with low probability (configurable in `[surprise]`)
 
 For new users without history:
 
@@ -144,7 +145,7 @@ python -m src.recommender.train_als --city-qid Q35765 --visits-limit 200000 --ou
 Ranking:
 
 ```bash
-python -m src.recommender.eval.evaluate --city-qid Q35765 --protocol last_trail_user --fair --visits-limit 120000 --k 20 --test-size 1 --min-train 2 --min-test-pois 4 --max-users 300 --modes embed item markov als hybrid content --use-embeddings --embeddings-path src/recommender/cache/word2vec_q35765.joblib --use-als --als-path src/recommender/cache/als_q35765.joblib --output data/reports/eval_q35765_current.json
+python -m src.recommender.eval.evaluate --city-qid Q35765 --protocol last_trail_user --fair --visits-limit 120000 --k 20 --test-size 1 --min-train 2 --min-test-pois 4 --max-users 300 --modes embed item markov als hybrid content random --use-embeddings --embeddings-path src/recommender/cache/word2vec_q35765.joblib --use-als --als-path src/recommender/cache/als_q35765.joblib --output data/reports/eval_q35765_current.json
 ```
 
 Route quality:
@@ -159,6 +160,10 @@ Primary ranking metrics currently reported:
 - `precision@k`
 - `recall@k`
 - `ndcg@k`
+- `cat_hit@k`
+- `cat_precision@k`
+- `cat_recall@k`
+- `cat_ndcg@k`
 - `novelty`
 - `diversity`
 

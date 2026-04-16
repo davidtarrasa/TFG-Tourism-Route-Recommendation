@@ -95,3 +95,12 @@ user_top_categories = 5
 [markov]
 # Penalize very popular POIs (hubs) in Markov recommendations.
 hub_alpha = 0.5
+
+[surprise]
+# Optional product feature: inject one "soft surprise" POI in the FULL route.
+# This is intentionally low probability and does NOT affect offline evaluation.
+enabled = true
+soft_rate = 0.03
+min_score_ratio = 0.35
+soft_max_km = 3.0
+seed = 42

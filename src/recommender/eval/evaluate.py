@@ -12,6 +12,7 @@ Modos soportados: hybrid, content, item, markov, embed (si hay modelo Word2Vec e
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from collections import defaultdict
 from typing import Dict, Iterable, List, Optional, Tuple
@@ -178,21 +179,96 @@ def _diversity_at_k(rec_ids: List[str], poi_primary_map: Dict[str, str]) -> floa
     return float(len(set(cats)) / len(cats))
 
 
+def _ndcg_from_binary_relevance(relevance: List[float], ideal_ones: int) -> float:
+    if not relevance:
+        return 0.0
+    dcg = 0.0
+    for i, rel in enumerate(relevance):
+        if rel > 0:
+            dcg += float(rel) / np.log2(i + 2.0)
+    idcg = 0.0
+    for i in range(int(max(ideal_ones, 0))):
+        idcg += 1.0 / np.log2(i + 2.0)
+    if idcg <= 0:
+        return 0.0
+    return float(dcg / idcg)
+
+
+def _normalize_category(value: object) -> Optional[str]:
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    if s.lower() in {"nan", "none", "null"}:
+        return None
+    return s
+
+
+def _stable_case_seed(base_seed: int, protocol: str, case_id: object) -> int:
+    payload = f"{protocol}:{case_id}".encode("utf-8", errors="ignore")
+    h = hashlib.blake2b(payload, digest_size=8).digest()
+    v = int.from_bytes(h, byteorder="little", signed=False)
+    return int((int(base_seed) + v) % (2**32 - 1))
+
+
 def compute_metrics(recs: List[str], truth: Iterable[str], k: int) -> Dict[str, float]:
-    truth_set = set(truth)
+    truth_set = set(str(x) for x in truth)
     if not truth_set or not recs:
-        return {"hit": 0.0, "recall": 0.0, "mrr": 0.0, "ndcg": 0.0}
-    recs_at_k = recs[:k]
-    hits = [i for i, r in enumerate(recs_at_k) if r in truth_set]
+        return {"hit": 0.0, "precision": 0.0, "recall": 0.0, "mrr": 0.0, "ndcg": 0.0}
+    recs_at_k = [str(x) for x in recs[:k]]
+    relevance = [1.0 if r in truth_set else 0.0 for r in recs_at_k]
+    hits = [i for i, rel in enumerate(relevance) if rel > 0]
     hit_flag = 1.0 if hits else 0.0
-    recall = len(hits) / len(truth_set)
+    precision = float(sum(relevance) / max(int(k), 1))
+    recall = float(sum(relevance) / max(len(truth_set), 1))
     mrr = 0.0
-    ndcg = 0.0
     if hits:
-        rank = min(hits) + 1  # 1-based
-        mrr = 1.0 / rank
-        ndcg = 1.0 / np.log2(rank + 1)
-    return {"hit": hit_flag, "recall": recall, "mrr": mrr, "ndcg": ndcg}
+        mrr = 1.0 / float(min(hits) + 1)
+    ndcg = _ndcg_from_binary_relevance(relevance, ideal_ones=min(len(truth_set), int(k)))
+    return {"hit": hit_flag, "precision": precision, "recall": recall, "mrr": mrr, "ndcg": ndcg}
+
+
+def compute_category_metrics(
+    recs: List[str],
+    truth: Iterable[str],
+    k: int,
+    poi_primary_map: Dict[str, str],
+) -> Dict[str, float]:
+    truth_cats = {
+        c
+        for poi in truth
+        for c in [_normalize_category(poi_primary_map.get(str(poi)))]
+        if c is not None
+    }
+    if not truth_cats or not recs:
+        return {"hit": 0.0, "precision": 0.0, "recall": 0.0, "ndcg": 0.0}
+
+    rec_cats = [
+        _normalize_category(poi_primary_map.get(str(poi)))
+        for poi in recs[:k]
+    ]
+
+    # Category-level relevance is counted once per relevant category.
+    # Repeating the same category should not keep increasing gain.
+    seen_relevant_cats = set()
+    relevance: List[float] = []
+    for c in rec_cats:
+        if c is None or c not in truth_cats:
+            relevance.append(0.0)
+            continue
+        if c in seen_relevant_cats:
+            relevance.append(0.0)
+            continue
+        seen_relevant_cats.add(c)
+        relevance.append(1.0)
+
+    hit_flag = 1.0 if any(rel > 0 for rel in relevance) else 0.0
+    precision = float(sum(relevance) / max(int(k), 1))
+    matched_cats = {c for c in rec_cats if c is not None and c in truth_cats}
+    recall = float(len(matched_cats) / max(len(truth_cats), 1))
+    ndcg = _ndcg_from_binary_relevance(relevance, ideal_ones=min(len(truth_cats), int(k)))
+    return {"hit": hit_flag, "precision": precision, "recall": recall, "ndcg": ndcg}
 
 
 def eval_modes(
@@ -223,7 +299,23 @@ def eval_modes(
     item_counts: Dict[str, int] = train_visits["venue_id"].astype(str).value_counts().to_dict()
     poi_primary_map: Dict[str, str] = {}
     if not pois.empty and "fsq_id" in pois.columns and "primary_category" in pois.columns:
-        poi_primary_map = {str(k): str(v) for k, v in pois.set_index("fsq_id")["primary_category"].to_dict().items()}
+        poi_primary_map = {
+            str(k): str(v)
+            for k, v in pois.set_index("fsq_id")["primary_category"].to_dict().items()
+            if _normalize_category(v) is not None
+        }
+    if not poi_cats.empty and {"fsq_id", "category_name"}.issubset(set(poi_cats.columns)):
+        fallback_cats = (
+            poi_cats.dropna(subset=["category_name"])
+            .groupby("fsq_id", as_index=False)["category_name"]
+            .first()
+            .set_index("fsq_id")["category_name"]
+            .to_dict()
+        )
+        for pid, cat in fallback_cats.items():
+            key = str(pid)
+            if key not in poi_primary_map and _normalize_category(cat) is not None:
+                poi_primary_map[key] = str(cat)
     # Features globales sobre train
     tfidf_matrix, tfidf_ids, _ = build_tfidf(poi_cats)
     co_mat, id_to_idx, idx_to_id = build_cooccurrence(train_visits)
@@ -406,10 +498,6 @@ def eval_modes(
             else:
                 embed_scores = score_embeddings_next(embed_model, str(current_poi), topn=topn)
             embed_scores = _apply_hub_penalty(embed_scores, item_counts=item_counts, alpha=float(emb_cfg.get("hub_alpha", 0.0)))
-            # Remove already-seen items early; embeddings often rank near-duplicates from the same trail very high.
-            if seen:
-                embed_scores = {k: v for k, v in embed_scores.items() if k not in seen}
-
         als_scores = {}
         if als_obj:
             from ..models.als import score_als
@@ -441,10 +529,18 @@ def eval_modes(
         als_scores = norm(als_scores)
 
         allowed_ids = set(pois["fsq_id"].astype(str))
-        content_scores = {k: v for k, v in content_scores.items() if k in allowed_ids}
-        co_scores = {k: v for k, v in co_scores.items() if k in allowed_ids}
-        markov_scores = {k: v for k, v in markov_scores.items() if k in allowed_ids}
-        embed_scores = {k: v for k, v in embed_scores.items() if k in allowed_ids}
+        candidate_pool = {fid for fid in allowed_ids if fid not in seen}
+
+        def filter_scores(scores: Dict[str, float]) -> Dict[str, float]:
+            if not scores:
+                return {}
+            return {pid: val for pid, val in scores.items() if pid in candidate_pool}
+
+        content_scores = filter_scores(content_scores)
+        co_scores = filter_scores(co_scores)
+        markov_scores = filter_scores(markov_scores)
+        embed_scores = filter_scores(embed_scores)
+        als_scores = filter_scores(als_scores)
 
         def combine(w_content, w_co, w_markov, w_embed, w_als):
             all_ids = (
@@ -463,6 +559,9 @@ def eval_modes(
                 for fid in all_ids
             }
 
+        case_seed = int(seed if seed is not None else eval_cfg.get("seed", 42))
+        case_rng = np.random.default_rng(_stable_case_seed(case_seed, protocol, case_id))
+
         for mode in modes:
             if mode == "content":
                 rec_scores = content_scores
@@ -474,7 +573,7 @@ def eval_modes(
                 rec_scores = embed_scores
             elif mode == "als":
                 rec_scores = als_scores
-            else:  # hybrid
+            elif mode == "hybrid":
                 if protocol == "trail" and current_poi:
                     w = list(hyb_cfg.get("trail_current", [0.05, 0.10, 0.55, 0.30, 0.00]))
                 elif user_items and current_poi:
@@ -494,24 +593,49 @@ def eval_modes(
                 if not embed_scores:
                     w[3] = 0.0
                 rec_scores = combine(*w)
+            elif mode == "random":
+                if not candidate_pool:
+                    continue
+                sample = list(candidate_pool)
+                sample.sort()
+                case_rng.shuffle(sample)
+                rec_ids = sample[:k]
+                m = compute_metrics(rec_ids, truth_items, k)
+                cm = compute_category_metrics(rec_ids, truth_items, k, poi_primary_map=poi_primary_map)
+                novelty = _novelty_at_k(rec_ids, item_counts=item_counts)
+                diversity = _diversity_at_k(rec_ids, poi_primary_map=poi_primary_map)
+                metrics_acc[(mode, "hit")].append(float(m.get("hit", 0.0)))
+                metrics_acc[(mode, "precision")].append(float(m.get("precision", 0.0)))
+                metrics_acc[(mode, "recall")].append(float(m.get("recall", 0.0)))
+                metrics_acc[(mode, "ndcg")].append(float(m.get("ndcg", 0.0)))
+                metrics_acc[(mode, "cat_hit")].append(float(cm.get("hit", 0.0)))
+                metrics_acc[(mode, "cat_precision")].append(float(cm.get("precision", 0.0)))
+                metrics_acc[(mode, "cat_recall")].append(float(cm.get("recall", 0.0)))
+                metrics_acc[(mode, "cat_ndcg")].append(float(cm.get("ndcg", 0.0)))
+                metrics_acc[(mode, "novelty")].append(novelty)
+                metrics_acc[(mode, "diversity")].append(diversity)
+                continue
+            else:
+                continue
 
             if not rec_scores:
                 continue
             recs_sorted = sorted(rec_scores.items(), key=lambda x: x[1], reverse=True)
-            # Evaluate against *new* POIs -> remove already-seen items from the recommendation list.
-            rec_ids = [r[0] for r in recs_sorted if r[0] not in seen][:k]
+            rec_ids = [r[0] for r in recs_sorted][:k]
             m = compute_metrics(rec_ids, truth_items, k)
-            truth_set = set(truth_items)
-            hits = sum(1 for r in rec_ids if r in truth_set)
-            precision = float(hits / max(int(k), 1))
+            cm = compute_category_metrics(rec_ids, truth_items, k, poi_primary_map=poi_primary_map)
             novelty = _novelty_at_k(rec_ids, item_counts=item_counts)
             diversity = _diversity_at_k(rec_ids, poi_primary_map=poi_primary_map)
 
             # Main metrics requested by tutor (+ hit for quick compatibility checks).
             metrics_acc[(mode, "hit")].append(float(m.get("hit", 0.0)))
-            metrics_acc[(mode, "precision")].append(precision)
+            metrics_acc[(mode, "precision")].append(float(m.get("precision", 0.0)))
             metrics_acc[(mode, "recall")].append(float(m.get("recall", 0.0)))
             metrics_acc[(mode, "ndcg")].append(float(m.get("ndcg", 0.0)))
+            metrics_acc[(mode, "cat_hit")].append(float(cm.get("hit", 0.0)))
+            metrics_acc[(mode, "cat_precision")].append(float(cm.get("precision", 0.0)))
+            metrics_acc[(mode, "cat_recall")].append(float(cm.get("recall", 0.0)))
+            metrics_acc[(mode, "cat_ndcg")].append(float(cm.get("ndcg", 0.0)))
             metrics_acc[(mode, "novelty")].append(novelty)
             metrics_acc[(mode, "diversity")].append(diversity)
         users_evaluated.add(uid)
@@ -538,7 +662,7 @@ def main():
     parser.add_argument(
         "--protocol",
         choices=["user", "trail", "last_trail_user"],
-        default="user",
+        default="last_trail_user",
         help="Como se hace el split: user (por usuario), trail (por ruta), last_trail_user (ultima ruta por usuario).",
     )
     parser.add_argument("--max-users", type=int, help="Limitar número de usuarios evaluados")
@@ -553,7 +677,7 @@ def main():
         action="store_true",
         help="Entrena modelos SOLO con el split de train (más lento, sin fuga de información).",
     )
-    parser.add_argument("--modes", nargs="+", default=["hybrid", "content", "item", "markov", "embed", "als"], help="Modos a evaluar")
+    parser.add_argument("--modes", nargs="+", default=["hybrid", "content", "item", "markov", "embed", "als", "random"], help="Modos a evaluar")
     parser.add_argument("--output", help="Guardar resultados en JSON/CSV (según extensión)")
     args = parser.parse_args()
     cfg = load_config(DEFAULT_CONFIG_PATH, city_qid=args.city_qid)

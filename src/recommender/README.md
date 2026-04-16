@@ -128,6 +128,8 @@ Possible variants:
 - `full`
   - combines whichever signals are available
   - blended from active route variants when enough components exist
+  - optional low-probability "soft surprise" replacement of one stop
+    (quality-gated and geo-reasonable, flagged as `is_surprise=true`)
 
 Hard rule:
 
@@ -208,6 +210,7 @@ This controls:
 - route planner parameters
 - eval seeds/defaults
 - filter policies
+- surprise policy (`[surprise]`)
 
 Key files to inspect
 --------------------

@@ -38,7 +38,7 @@ Important split controls:
 Example:
 
 ```bash
-python -m src.recommender.eval.evaluate --city-qid Q35765 --protocol last_trail_user --fair --visits-limit 120000 --k 20 --test-size 1 --min-train 2 --min-test-pois 4 --max-users 300 --seed 42 --modes embed item markov als hybrid content --use-embeddings --embeddings-path src/recommender/cache/word2vec_q35765.joblib --use-als --als-path src/recommender/cache/als_q35765.joblib --output data/reports/eval_q35765_current.json
+python -m src.recommender.eval.evaluate --city-qid Q35765 --protocol last_trail_user --fair --visits-limit 120000 --k 20 --test-size 1 --min-train 2 --min-test-pois 4 --max-users 300 --seed 42 --modes embed item markov als hybrid content random --use-embeddings --embeddings-path src/recommender/cache/word2vec_q35765.joblib --use-als --als-path src/recommender/cache/als_q35765.joblib --output data/reports/eval_q35765_current.json
 ```
 
 Reported metrics (per mode):
@@ -47,11 +47,17 @@ Reported metrics (per mode):
 - `precision@k`
 - `recall@k`
 - `ndcg@k`
+- `cat_hit@k`
+- `cat_precision@k`
+- `cat_recall@k`
+- `cat_ndcg@k`
 - `novelty`
 - `diversity`
 
 Notes:
 
+- `random` is available as a trivial baseline and follows the same split/candidate/exclusion protocol as the rest.
+- All modes are evaluated with the same fixed seed item from test for the selected protocol.
 - `--fair` retrains models on train split only (leak-free, slower).
 - without `--fair`, cached artifacts can be loaded (faster).
 - `--seed` controls sampled cases when limits apply.

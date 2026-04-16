@@ -15,13 +15,16 @@ Rules:
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 from typing import Dict, List, Optional, Tuple
 
+import numpy as np
 import pandas as pd
 
 from .category_intents import INCONCLUSIVE, classify_category_intent, infer_user_intents
 from .prefs import Prefs, normalize_categories
 from .scorer import recommend
+from .config import DEFAULT_CONFIG_PATH, load_config
 from .utils_db import get_conn, load_pois
 
 
@@ -32,6 +35,176 @@ class MultiRouteResult:
     routes: Dict[str, pd.DataFrame]
     omitted: Dict[str, str]
     warnings: List[str]
+
+
+def _stable_seed_for_surprise(
+    *,
+    base_seed: int,
+    city_qid: Optional[str],
+    user_id: Optional[int],
+    lat: Optional[float],
+    lon: Optional[float],
+    k: int,
+) -> int:
+    payload = f"{city_qid}|{user_id}|{lat}|{lon}|{k}".encode("utf-8", errors="ignore")
+    h = hashlib.blake2b(payload, digest_size=8).digest()
+    v = int.from_bytes(h, byteorder="little", signed=False)
+    return int((int(base_seed) + v) % (2**32 - 1))
+
+
+def _collect_row_intents(df: pd.DataFrame) -> set:
+    intents = set()
+    if df is None or df.empty:
+        return intents
+    if "primary_category" not in df.columns:
+        return intents
+    for c in df["primary_category"].astype(str).tolist():
+        c = str(c).strip()
+        if not c or c.lower() in {"nan", "none", "null"}:
+            continue
+        i, _, _ = classify_category_intent(c, use_semantic=False)
+        if i and i != INCONCLUSIVE:
+            intents.add(i)
+    return intents
+
+
+def _inject_soft_surprise(
+    *,
+    route_df: pd.DataFrame,
+    pool_df: pd.DataFrame,
+    k: int,
+    prefs: Optional[Prefs],
+    lat: Optional[float],
+    lon: Optional[float],
+    city_qid: Optional[str],
+    user_id: Optional[int],
+) -> Tuple[pd.DataFrame, bool]:
+    cfg = load_config(DEFAULT_CONFIG_PATH, city_qid=city_qid)
+    s_cfg = cfg.get("surprise", {})
+    if not bool(s_cfg.get("enabled", True)):
+        return route_df, False
+    rate = float(s_cfg.get("soft_rate", 0.03))
+    if rate <= 0:
+        return route_df, False
+    if route_df is None or route_df.empty or pool_df is None or pool_df.empty:
+        return route_df, False
+
+    seed = _stable_seed_for_surprise(
+        base_seed=int(s_cfg.get("seed", 42)),
+        city_qid=city_qid,
+        user_id=user_id,
+        lat=lat,
+        lon=lon,
+        k=int(k),
+    )
+    rng = np.random.default_rng(seed)
+    if float(rng.random()) >= rate:
+        out = route_df.copy()
+        out["is_surprise"] = False
+        return out, False
+
+    route = route_df.copy()
+    route["is_surprise"] = False
+    route_ids = set(route["fsq_id"].astype(str)) if "fsq_id" in route.columns else set()
+    pool = pool_df.copy()
+    if "fsq_id" not in pool.columns:
+        return route, False
+    pool = pool[~pool["fsq_id"].astype(str).isin(route_ids)].copy()
+    if pool.empty:
+        return route, False
+
+    pool = _coalesce_latlon_columns(pool)
+    pool["score"] = pd.to_numeric(pool.get("score", 0.0), errors="coerce").fillna(0.0)
+    pool["lat"] = pd.to_numeric(pool.get("lat"), errors="coerce")
+    pool["lon"] = pd.to_numeric(pool.get("lon"), errors="coerce")
+    pool = pool.dropna(subset=["lat", "lon"], how="any")
+    if pool.empty:
+        return route, False
+
+    # Keep "soft" candidates: decent score and not too far from anchor/route center.
+    smax = float(pool["score"].max()) if not pool.empty else 0.0
+    min_ratio = float(s_cfg.get("min_score_ratio", 0.35))
+    if smax > 0:
+        pool = pool[pool["score"] >= (min_ratio * smax)].copy()
+    if pool.empty:
+        return route, False
+
+    if lat is not None and lon is not None:
+        ref_lat, ref_lon = float(lat), float(lon)
+    else:
+        r2 = _coalesce_latlon_columns(route)
+        if "lat" in r2.columns and "lon" in r2.columns:
+            r2 = r2.dropna(subset=["lat", "lon"], how="any")
+            if not r2.empty:
+                ref_lat = float(pd.to_numeric(r2["lat"], errors="coerce").mean())
+                ref_lon = float(pd.to_numeric(r2["lon"], errors="coerce").mean())
+            else:
+                ref_lat, ref_lon = None, None
+        else:
+            ref_lat, ref_lon = None, None
+
+    if ref_lat is not None and ref_lon is not None:
+        pool["__dist_ref"] = pool.apply(
+            lambda r: _haversine_km(ref_lat, ref_lon, float(r["lat"]), float(r["lon"])),
+            axis=1,
+        )
+        soft_max_km = float(s_cfg.get("soft_max_km", 3.0))
+        pool = pool[pool["__dist_ref"] <= soft_max_km].copy()
+    else:
+        pool["__dist_ref"] = 0.0
+    if pool.empty:
+        return route, False
+
+    pref_intents = set()
+    if prefs and prefs.categories:
+        pref_intents = set(i for i in infer_user_intents(normalize_categories(prefs.categories)) if i and i != INCONCLUSIVE)
+    route_intents = _collect_row_intents(route)
+    target_intents = pref_intents or route_intents
+
+    def _cand_intent(row: pd.Series) -> str:
+        c = str(row.get("primary_category") or "").strip()
+        if not c:
+            return INCONCLUSIVE
+        i, _, _ = classify_category_intent(c, use_semantic=False)
+        return i
+
+    pool["__intent"] = pool.apply(_cand_intent, axis=1)
+    pool["__intent_match"] = pool["__intent"].apply(lambda i: 1.0 if i in target_intents else 0.0)
+
+    # Soft surprise ranking: still "reasonable" and close.
+    pmin = float(pool["score"].min())
+    pmax = float(pool["score"].max())
+    if pmax - pmin <= 1e-12:
+        pool["__s_norm"] = 0.0
+    else:
+        pool["__s_norm"] = (pool["score"] - pmin) / (pmax - pmin)
+    dmax = float(pool["__dist_ref"].max()) if not pool.empty else 0.0
+    if dmax <= 1e-12:
+        pool["__d_pref"] = 1.0
+    else:
+        pool["__d_pref"] = 1.0 - (pool["__dist_ref"] / dmax)
+    pool["__surprise_soft_score"] = 0.55 * pool["__s_norm"] + 0.30 * pool["__d_pref"] + 0.15 * pool["__intent_match"]
+    pool = pool.sort_values("__surprise_soft_score", ascending=False).head(int(max(10, min(40, len(pool)))))
+    if pool.empty:
+        return route, False
+
+    chosen = pool.iloc[int(rng.integers(0, len(pool)))]
+    cand = chosen.to_dict()
+    cand["is_surprise"] = True
+    # Replace last slot to minimize route disruption.
+    out = route.head(int(k)).copy()
+    if out.empty:
+        return route, False
+    out.iloc[len(out) - 1] = pd.Series(cand).reindex(out.columns)
+    if "fsq_id" in out.columns:
+        out = out.drop_duplicates(subset=["fsq_id"], keep="first")
+    if len(out) < int(k):
+        filler = route[~route["fsq_id"].astype(str).isin(set(out["fsq_id"].astype(str)))].copy()
+        if not filler.empty:
+            filler["is_surprise"] = False
+            out = pd.concat([out, filler], ignore_index=True).head(int(k))
+    out = out.reset_index(drop=True)
+    return out, True
 
 
 def _has_inputs(prefs: Optional[Prefs], free_only: bool, max_price_tier: Optional[int]) -> bool:
@@ -742,13 +915,14 @@ def build_multi_routes(
     if location_present:
         full_distance_weight = 0.45 if prioritize_proximity else 0.30
 
+    full_pool_k = int(max(int(k), min(400, max(int(k) * 8, int(k) + 80))))
     df = recommend(
         dsn=dsn,
         city=city,
         city_qid=city_qid,
         user_id=user_id if history_present else None,
         current_poi=current_poi,
-        k=k,
+        k=full_pool_k,
         visits_limit=visits_limit,
         mode=full_mode,
         use_embeddings=use_embeddings,
@@ -783,14 +957,29 @@ def build_multi_routes(
         blend_parts.append(("location", routes["location"], loc_w))
 
     if len(blend_parts) >= 2:
-        blended = _blend_routes(blend_parts, k=k)
+        blended = _blend_routes(blend_parts, k=full_pool_k)
         if not blended.empty:
             df = blended
 
     if df.empty:
         omitted["full"] = "empty_result"
     else:
-        routes["full"] = df
+        df_full = df.head(int(k)).reset_index(drop=True)
+        df_full, surprise_used = _inject_soft_surprise(
+            route_df=df_full,
+            pool_df=df,
+            k=int(k),
+            prefs=prefs,
+            lat=lat,
+            lon=lon,
+            city_qid=city_qid,
+            user_id=user_id if history_present else None,
+        )
+        if surprise_used:
+            warnings.append("soft_surprise_injected:full")
+        elif "is_surprise" not in df_full.columns:
+            df_full["is_surprise"] = False
+        routes["full"] = df_full
 
     if not routes:
         warnings.append("no_routes_generated")

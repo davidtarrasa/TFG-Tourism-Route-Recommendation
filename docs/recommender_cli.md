@@ -1,7 +1,7 @@
 ﻿# Recomendador (CLI) - Guia rapida
 
 Modos y senales
-- Modos: `hybrid`, `content`, `item`, `markov`, `embed`, `als`.
+- Modos: `hybrid`, `content`, `item`, `markov`, `embed`, `als`, `random` (baseline).
 - Senales: categorias (TF-IDF), co-visitas, Markov secuencial, embeddings Word2Vec, ALS implicito.
 - Re-ranking: precio/gratis, distancia, diversidad y preferencias.
 - `--build-route` genera HTML + GeoJSON en `data/reports/routes/`.
@@ -26,9 +26,9 @@ Nota PowerShell: usa una sola linea o el backtick `` ` `` para continuacion.
 
 Evaluacion ranking
 ```bash
-python -m src.recommender.eval.evaluate --city-qid Q35765 --protocol last_trail_user --fair --k 20 --test-size 1 --min-train 2 --min-test-pois 4 --max-users 300 --seed 42 --modes embed item markov als hybrid content --use-als --als-path src/recommender/cache/als_q35765.joblib --use-embeddings --embeddings-path src/recommender/cache/word2vec_q35765.joblib --output data/reports/eval_q35765_current.json
+python -m src.recommender.eval.evaluate --city-qid Q35765 --protocol last_trail_user --fair --k 20 --test-size 1 --min-train 2 --min-test-pois 4 --max-users 300 --seed 42 --modes embed item markov als hybrid content random --use-als --als-path src/recommender/cache/als_q35765.joblib --use-embeddings --embeddings-path src/recommender/cache/word2vec_q35765.joblib --output data/reports/eval_q35765_current.json
 ```
-Metricas: `hit@k`, `precision@k`, `recall@k`, `ndcg@k`, `novelty`, `diversity`.
+Metricas: `hit@k`, `precision@k`, `recall@k`, `ndcg@k`, `cat_hit@k`, `cat_precision@k`, `cat_recall@k`, `cat_ndcg@k`, `novelty`, `diversity`.
 
 Evaluacion de rutas
 ```bash
@@ -58,6 +58,8 @@ Multi-ruta (CLI)
 ```bash
 python -m src.recommender.multi_route_cli --city-qid Q35765 --user-id 2725 --lat 34.6937 --lon 135.5023 --prefs "museum,park,cheap" --use-embeddings --embeddings-path src/recommender/cache/word2vec_q35765.joblib --use-als --als-path src/recommender/cache/als_q35765.joblib --build-route --out-dir data/reports/routes/multi_route_q35765 --out-json data/reports/multi_route_q35765.json
 ```
+Nota: la ruta `full` puede incluir un POI sorpresa suave con baja probabilidad
+(`configs/recommender.toml` -> `[surprise]`). El POI inyectado se marca con `is_surprise=true`.
 
 Normalizacion de ciudad en POIs
 ```bash
