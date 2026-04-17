@@ -217,3 +217,105 @@ Frontend details: `frontend/README.md`
 - Evaluation internals: `src/recommender/eval/README.md`
 - CLI usage summary: `docs/recommender_cli.md`
 - Extended project dossier: `docs/tfg_dossier_completo.md`
+
+## 🗺️ Pipeline del sistema
+
+```mermaid
+flowchart TD
+    U(["👤 Usuario\nnavegador"]):::user
+    W["Interfaz Web\nHTML · Leaflet.js"]
+    API["FastAPI\nBackend"]
+    DB[("PostgreSQL\nvisits · pois · categories")]
+    REC{"Motor de\nrecomendación"}
+    CF["Content\nTF-IDF sobre categorías"]
+    II["Item-Item\nCo-visitación"]
+    MK["Markov\nTransiciones secuenciales"]
+    EM["Embed\nWord2Vec sobre trails"]
+    AL["ALS\nFiltrado colaborativo implícito"]
+    HY["Hybrid\nFusión ponderada"]
+    RANK["Re-ranking\n+ filtrado de ya visitados"]
+    MAP[["🗺️ Mapa interactivo\n+ itinerario ordenado"]]
+
+    U --> W --> API
+    API --> DB
+    API --> REC
+    REC --> CF & II & MK & EM & AL & HY
+    CF & II & MK & EM & AL & HY --> RANK
+    RANK --> MAP --> U
+
+    classDef user fill:#4a90d9,color:#fff,stroke:#2c5f8a
+    classDef engine fill:#f0a500,color:#fff,stroke:#c47e00
+    classDef db fill:#5cb85c,color:#fff,stroke:#3d7a3d
+    class U user
+    class CF,II,MK,EM,AL,HY engine
+    class DB db
+```
+
+## ?? Pipeline de scoring por petici?n
+
+```mermaid
+sequenceDiagram
+    actor U as Usuario
+    participant FE as Frontend
+    participant API as FastAPI
+    participant SC as scorer.py
+    participant RP as route_planner.py
+    participant RB as route_builder.py
+    participant DB as PostgreSQL
+
+    U->>FE: Introduce preferencias + ciudad
+    FE->>API: POST /multi-recommend
+    API->>DB: Cargar candidatos POIs (ciudad)
+    DB-->>API: Pool de POIs
+    API->>SC: score(user_id, prefs, city)
+    SC->>SC: TF-IDF + Markov + Word2Vec + ALS
+    SC->>SC: Normalizar + fusi?n ponderada
+    SC-->>API: POIs ordenados por score
+    API->>RP: plan_route(scored_pois, k, constraints)
+    RP-->>API: Selecci?n de k POIs
+    API->>RB: build_route(poi_subset)
+    RB->>RB: NN + 2-opt ordering
+    RB-->>API: GeoJSON + HTML Folium
+    API-->>FE: {variantes: history, inputs, location, full}
+    FE-->>U: Mapa con ruta + lista POIs
+```
+
+
+## 🧠 Flujo de decisión por tipo de usuario
+
+```mermaid
+flowchart TD
+    START(["Petición de ruta\nciudad · k POIs"])
+    H1{¿Usuario tiene\nhistorial de visitas?}
+    H2{¿Proporciona\npreferencias de categoría?}
+    H3{¿Historial rico\n≥ 10 visitas?}
+    H4{¿Usuario\nrecurrente en la ciudad?}
+
+    CT["🏷️ Motor Content\nTF-IDF · preferencias declaradas"]
+    POP["🌟 Motor Item-Item\nPOIs populares en la ciudad"]
+    EM["🔡 Motor Embed\nWord2Vec · trails cortos"]
+    AL["🤝 Motor ALS\nFiltrado colaborativo"]
+    HY["⚡ Motor Hybrid\nALS + Markov + Embed"]
+
+    EVA["Evaluación offline\nHit@k · NDCG · Diversidad · Novelty"]
+    OUT[["🗺️ Ruta generada\nk POIs ordenados + mapa"]]
+
+    START --> H1
+    H1 -- No --> H2
+    H2 -- Sí --> CT
+    H2 -- No --> POP
+    H1 -- Sí --> H3
+    H3 -- No --> EM
+    H3 -- Sí --> H4
+    H4 -- No --> AL
+    H4 -- Sí --> HY
+
+    CT & POP & EM & AL & HY --> EVA --> OUT
+
+    classDef decision fill:#fff3cd,stroke:#f0a500,color:#333
+    classDef engine fill:#d4edda,stroke:#28a745,color:#155724
+    classDef io fill:#cce5ff,stroke:#004085,color:#004085
+    class H1,H2,H3,H4 decision
+    class CT,POP,EM,AL,HY engine
+    class START,OUT io
+```
