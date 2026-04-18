@@ -294,10 +294,10 @@ sequenceDiagram
     DB-->>API: Pool de POIs
     API->>SC: score(user_id, prefs, city)
     SC->>SC: TF-IDF + Markov + Word2Vec + ALS
-    SC->>SC: Normalizar + fusi?n ponderada
+    SC->>SC: Normalizar + fusion ponderada
     SC-->>API: POIs ordenados por score
     API->>RP: plan_route(scored_pois, k, constraints)
-    RP-->>API: Selecci?n de k POIs
+    RP-->>API: Seleccion de k POIs
     API->>RB: build_route(poi_subset)
     RB->>RB: NN + 2-opt ordering
     RB-->>API: GeoJSON + HTML Folium
@@ -342,4 +342,57 @@ flowchart TD
     class H1,H2,H3,H4 decision
     class CT,POP,EM,AL,HY engine
     class START,OUT io
+```
+
+## 📊 Sistema de evaluación offline
+
+```mermaid
+flowchart TD
+    DATA[("PostgreSQL\nvisits · pois · categories")]
+
+    SPLIT{"Protocolo\nlast_trail_user"}
+    TRAIN["Trails 1 a N-1\n→ TRAIN"]
+    TEST["Trail N (ultimo)\n→ TEST"]
+    SKIP["Usuario excluido\n(solo 1 trail)"]
+
+    FAIR["--fair: reentrenar\nWord2Vec · ALS sobre TRAIN"]
+
+    SEED["Seed = POI1\n(primer POI del trail test)"]
+    GT["Ground truth\nPOI2 · POI3 · ... · POIn"]
+
+    ENG["9 motores\ncontent · item · markov · embed · als\nhybrid · rrf · popular · random"]
+
+    TOPK["Top-K candidatos\npor motor"]
+    CMP["Comparar top-K\nvs ground truth"]
+
+    M1["Hit@K · Precision@K · Recall@K · nDCG@K"]
+    M2["cat_Hit@K · cat_nDCG@K · Novelty · Diversity"]
+
+    AGG["Agregacion por usuario\ncold menos de 5 visitas · warm 5 o mas"]
+
+    OUT[["JSON resultados\n3 ciudades x 9 motores x cold/warm"]]
+
+    DATA --> SPLIT
+    SPLIT -- "2+ trails" --> TRAIN & TEST
+    SPLIT -- "1 trail" --> SKIP
+
+    TRAIN --> FAIR --> ENG
+    TEST --> SEED & GT
+    SEED --> ENG
+
+    ENG --> TOPK --> CMP
+    GT --> CMP
+
+    CMP --> M1 & M2 --> AGG --> OUT
+
+    classDef data fill:#2E86AB,color:#fff,stroke:#1a5c7a
+    classDef engine fill:#3BB273,color:#fff,stroke:#2a7a50
+    classDef metric fill:#7B2D8B,color:#fff,stroke:#5a1e68
+    classDef result fill:#1A1A2E,color:#fff,stroke:#0a0a1e
+    classDef split fill:#F18F01,color:#fff,stroke:#c47000
+    class DATA data
+    class ENG engine
+    class M1,M2 metric
+    class OUT result
+    class SPLIT split
 ```

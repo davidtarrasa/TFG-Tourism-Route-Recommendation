@@ -1205,6 +1205,259 @@ def fig_19_longitud_trails():
     plt.close(fig)
 
 
+def fig_20_eval_protocolo():
+    """Diagrama visual completo del protocolo de evaluación offline."""
+    W, H = 14, 24
+    fig, ax = plt.subplots(figsize=(W, H))
+    ax.set_xlim(0, W)
+    ax.set_ylim(0, H)
+    ax.axis("off")
+    fig.patch.set_facecolor("#FAFCFF")
+
+    # ── Paleta ──────────────────────────────────────────────────────────────
+    C_TRAIN  = "#2E86AB"
+    C_TEST   = "#F18F01"
+    C_ENGINE = "#3BB273"
+    C_METRIC = "#7B2D8B"
+    C_COLD   = "#E76F51"
+    C_WARM   = "#2196F3"
+    C_ARROW  = "#555555"
+
+    def _box(x, y, w, h, color, alpha=0.10, radius=0.12, lw=1.8):
+        p = patches.FancyBboxPatch(
+            (x, y), w, h,
+            boxstyle=f"round,pad=0.03,rounding_size={radius}",
+            linewidth=lw, edgecolor=color,
+            facecolor=mcolors.to_rgba(color, alpha),
+        )
+        ax.add_patch(p)
+
+    def _arrow(x0, y0, x1, y1):
+        ax.annotate(
+            "", xy=(x1, y1), xytext=(x0, y0),
+            arrowprops=dict(arrowstyle="-|>", lw=1.6, color=C_ARROW,
+                            connectionstyle="arc3,rad=0.0"),
+        )
+
+    def _section_title(x, y, text, color, size=12):
+        ax.text(x, y, text, fontsize=size, fontweight="bold", color=color, va="top")
+
+    # ════════════════════════════════════════════════════════════════════════
+    # TÍTULO PRINCIPAL
+    # ════════════════════════════════════════════════════════════════════════
+    _box(0.3, 22.4, W - 0.6, 1.3, "#1A1A2E", alpha=0.85, radius=0.15, lw=0)
+    ax.text(W / 2, 23.15, "Protocolo de Evaluación Offline",
+            fontsize=16, fontweight="bold", color="white",
+            ha="center", va="center")
+    ax.text(W / 2, 22.6, "last_trail_user  ·  --fair  ·  9 motores  ·  cold/warm split  ·  3 ciudades",
+            fontsize=9.5, color="#CCDDEE", ha="center", va="center")
+
+    # ════════════════════════════════════════════════════════════════════════
+    # SECCIÓN 1 — PARTICIÓN DE DATOS (last_trail_user)
+    # ════════════════════════════════════════════════════════════════════════
+    _box(0.3, 16.9, W - 0.6, 5.1, C_TRAIN, alpha=0.06, radius=0.14)
+    _section_title(0.65, 21.75, "1 · Partición   last_trail_user", C_TRAIN, size=12)
+
+    # Sub-boxes: usuario con ≥2 trails vs usuario con 1 trail
+    _box(0.65, 17.15, 6.2, 4.3, C_TRAIN, alpha=0.10)
+    ax.text(1.0, 21.2, "Usuario con >= 2 trails", fontsize=10, fontweight="bold", color=C_TRAIN)
+
+    # Dibujar 3 trails como barras horizontales
+    trail_colors = [C_TRAIN, C_TRAIN, C_TEST]
+    trail_labels = ["Trail 1  →  TRAIN", "Trail 2  →  TRAIN", "Trail 3 (último)  →  TEST"]
+    poi_counts   = [5, 4, 6]
+    for ti, (tc, tl, np_) in enumerate(zip(trail_colors, trail_labels, poi_counts)):
+        ty = 20.5 - ti * 1.0
+        for pi in range(np_):
+            circle = plt.Circle((1.1 + pi * 0.72, ty - 0.17), 0.24,
+                                 color=tc, alpha=0.85, zorder=3)
+            ax.add_patch(circle)
+            ax.text(1.1 + pi * 0.72, ty - 0.17, str(pi + 1),
+                    ha="center", va="center", fontsize=7, color="white", fontweight="bold", zorder=4)
+        ax.text(1.1 + np_ * 0.72 + 0.25, ty - 0.17, tl,
+                fontsize=8.5, va="center", color=tc, fontweight="bold" if ti == 2 else "normal")
+
+    # Flecha del trail 3 hacia TEST
+    ax.annotate("", xy=(3.2, 18.05), xytext=(3.2, 18.35),
+                arrowprops=dict(arrowstyle="-|>", lw=1.4, color=C_TEST))
+
+    # Caja TEST
+    _box(1.7, 17.2, 4.0, 0.72, C_TEST, alpha=0.18, lw=1.6)
+    ax.text(3.7, 17.61, "TEST  =  Trail 3 completo  ·  seed = POI_1  ·  truth = {POI_2 … POI_n}",
+            ha="center", va="center", fontsize=8, color="#7B3800")
+
+    # Sub-box usuario con solo 1 trail
+    _box(7.35, 17.15, 6.0, 4.3, "#888888", alpha=0.08)
+    ax.text(7.7, 21.2, "Usuario con solo 1 trail", fontsize=10, fontweight="bold", color="#666666")
+    tc = "#AAAAAA"
+    for pi in range(5):
+        circle = plt.Circle((7.8 + pi * 0.72, 20.3), 0.24, color=tc, alpha=0.6, zorder=3)
+        ax.add_patch(circle)
+        ax.text(7.8 + pi * 0.72, 20.3, str(pi + 1),
+                ha="center", va="center", fontsize=7, color="white", fontweight="bold", zorder=4)
+    ax.text(8.0, 19.5, "No se puede evaluar:\nno hay trails anteriores\npara entrenar", fontsize=8.5,
+            color="#888888", va="top")
+    _box(7.55, 17.2, 5.6, 0.72, "#888888", alpha=0.12, lw=1.3)
+    ax.text(10.35, 17.61, "SKIP  — usuario excluido del benchmark",
+            ha="center", va="center", fontsize=8, color="#555555")
+
+    _arrow(7.0, 19.5, 7.3, 19.5)
+
+    # ════════════════════════════════════════════════════════════════════════
+    # SECCIÓN 2 — REENTRENAMIENTO JUSTO (--fair)
+    # ════════════════════════════════════════════════════════════════════════
+    _box(0.3, 13.5, W - 0.6, 3.05, C_ENGINE, alpha=0.06, radius=0.14)
+    _section_title(0.65, 16.3, "2 · Reentrenamiento justo  (--fair)", C_ENGINE, size=12)
+    _arrow(W / 2, 16.9, W / 2, 16.6)
+
+    model_info = [
+        ("Word2Vec", "Retrenado sobre\ntrails de TRAIN", C_ENGINE, True),
+        ("ALS",      "Retrenado sobre\ninteracciones TRAIN", C_ENGINE, True),
+        ("Content",  "TF-IDF calculado\nsolo sobre TRAIN", "#888888", False),
+        ("Item-Item","Co-visitation\nsolo sobre TRAIN", "#888888", False),
+        ("Markov",   "Transiciones\nsolo sobre TRAIN", "#888888", False),
+    ]
+    box_w, box_h = 2.35, 1.85
+    total_w = len(model_info) * box_w + (len(model_info) - 1) * 0.18
+    x0_m = (W - total_w) / 2
+    for mi, (name, desc, col, retrained) in enumerate(model_info):
+        bx = x0_m + mi * (box_w + 0.18)
+        _box(bx, 13.65, box_w, box_h, col, alpha=0.14, lw=1.6)
+        ax.text(bx + box_w / 2, 14.95, name, ha="center", va="center",
+                fontsize=9.5, fontweight="bold", color=col)
+        badge = "RETRAIN" if retrained else "NO ARTIFACT"
+        badge_col = C_ENGINE if retrained else "#888888"
+        _box(bx + 0.15, 14.55, box_w - 0.3, 0.30, badge_col, alpha=0.25, radius=0.06, lw=1.0)
+        ax.text(bx + box_w / 2, 14.71, badge, ha="center", va="center",
+                fontsize=6.5, fontweight="bold", color=badge_col)
+        ax.text(bx + box_w / 2, 14.25, desc, ha="center", va="top",
+                fontsize=7.5, color="#333333", multialignment="center")
+
+    # ════════════════════════════════════════════════════════════════════════
+    # SECCIÓN 3 — BUCLE DE EVALUACIÓN POR USUARIO
+    # ════════════════════════════════════════════════════════════════════════
+    _box(0.3, 8.25, W - 0.6, 4.85, C_METRIC, alpha=0.06, radius=0.14)
+    _section_title(0.65, 12.9, "3 · Bucle de evaluación  (por cada usuario de test)", C_METRIC, size=12)
+    _arrow(W / 2, 13.5, W / 2, 13.1)
+
+    # Trail test visualizado
+    ax.text(0.75, 12.35, "Trail de test:", fontsize=9, color="#333333", va="center")
+    poi_labels = ["POI₁\n(seed)", "POI₂", "POI₃", "POI₄", "POI₅", "…"]
+    for pi, lbl in enumerate(poi_labels):
+        cx = 2.6 + pi * 1.22
+        col = C_TEST if pi == 0 else "#555588"
+        circle = plt.Circle((cx, 12.32), 0.32, color=col, alpha=0.85, zorder=3)
+        ax.add_patch(circle)
+        ax.text(cx, 12.32, lbl, ha="center", va="center",
+                fontsize=6.5, color="white", fontweight="bold", zorder=4)
+        if pi < len(poi_labels) - 1:
+            ax.annotate("", xy=(cx + 0.58, 12.32), xytext=(cx + 0.32, 12.32),
+                        arrowprops=dict(arrowstyle="-|>", lw=1.0, color="#AAAAAA"))
+
+    # Caja Ground Truth
+    _box(9.4, 11.85, 4.0, 0.90, C_TEST, alpha=0.15, lw=1.5)
+    ax.text(11.4, 12.32, "Ground truth\n{POI₂, POI₃, POI₄, POI₅, …}",
+            ha="center", va="center", fontsize=8, color="#7B3800")
+
+    # Flecha seed → motores
+    ax.text(3.5, 11.6, "seed = POI₁", fontsize=8, color=C_TEST, ha="center", style="italic")
+    _arrow(3.5, 11.55, 3.5, 11.25)
+
+    # Fila de motores (9)
+    engines = ["content", "item", "markov", "embed", "als", "hybrid", "rrf", "popular", "random"]
+    e_w, e_h = 1.28, 0.68
+    e_gap = 0.08
+    total_e = len(engines) * e_w + (len(engines) - 1) * e_gap
+    xe0 = (W - total_e) / 2
+    for ei, eng in enumerate(engines):
+        ex = xe0 + ei * (e_w + e_gap)
+        col = "#444444" if eng == "random" else ("#E8A000" if eng in ("popular", "rrf") else C_ENGINE)
+        _box(ex, 10.5, e_w, e_h, col, alpha=0.18, lw=1.3)
+        ax.text(ex + e_w / 2, 10.85, eng, ha="center", va="center",
+                fontsize=7.5, fontweight="bold", color=col)
+
+    # Flecha motores → top-K
+    _arrow(W / 2, 10.5, W / 2, 10.2)
+
+    # Caja Top-K recomendaciones
+    _box(3.5, 9.35, 7.0, 0.72, C_ENGINE, alpha=0.15, lw=1.5)
+    ax.text(7.0, 9.72, "Top-K POIs recomendados por cada motor",
+            ha="center", va="center", fontsize=8.5, color="#1B5E20")
+
+    # Flecha comparación → métricas
+    ax.annotate("", xy=(10.1, 10.35), xytext=(10.1, 11.78),
+                arrowprops=dict(arrowstyle="-|>", lw=1.4, color=C_ARROW, linestyle="dashed"))
+    ax.text(10.7, 11.1, "comparar", fontsize=7.5, color=C_METRIC, rotation=-90, va="center")
+
+    _arrow(W / 2, 9.35, W / 2, 9.15)
+
+    # ════════════════════════════════════════════════════════════════════════
+    # SECCIÓN 4 — MÉTRICAS Y AGREGACIÓN
+    # ════════════════════════════════════════════════════════════════════════
+    _box(0.3, 4.7, W - 0.6, 4.1, C_METRIC, alpha=0.06, radius=0.14)
+    _section_title(0.65, 8.6, "4 · Métricas y agregación", C_METRIC, size=12)
+
+    # Grupo relevancia
+    _box(0.55, 5.0, 4.1, 3.3, C_METRIC, alpha=0.10, lw=1.4)
+    ax.text(2.6, 8.08, "Relevancia individual", ha="center", fontsize=9.5,
+            fontweight="bold", color=C_METRIC)
+    for i, m in enumerate(["Hit@K", "Precision@K", "Recall@K", "nDCG@K"]):
+        ax.text(2.6, 7.65 - i * 0.55, m, ha="center", va="center", fontsize=9)
+
+    # Grupo categoría
+    _box(4.95, 5.0, 4.1, 3.3, C_METRIC, alpha=0.10, lw=1.4)
+    ax.text(7.0, 8.08, "Acierto por categoría", ha="center", fontsize=9.5,
+            fontweight="bold", color=C_METRIC)
+    for i, m in enumerate(["cat_Hit@K", "cat_Precision@K", "cat_Recall@K", "cat_nDCG@K"]):
+        ax.text(7.0, 7.65 - i * 0.55, m, ha="center", va="center", fontsize=9)
+
+    # Grupo más allá
+    _box(9.35, 5.0, 4.1, 3.3, C_METRIC, alpha=0.10, lw=1.4)
+    ax.text(11.4, 8.08, "Más allá de la precisión", ha="center", fontsize=9.5,
+            fontweight="bold", color=C_METRIC)
+    for i, (m, d) in enumerate([
+        ("Novelty", "−log₂ P(item)  ·  ítems poco vistos"),
+        ("Diversity", "1 − sim(coseno)  ·  variedad"),
+        ("Cold split", "< 5 visitas TRAIN"),
+        ("Warm split", ">= 5 visitas TRAIN"),
+    ]):
+        col = C_COLD if m == "Cold split" else (C_WARM if m == "Warm split" else "#222222")
+        ax.text(9.55, 7.65 - i * 0.55, f"• {m}:", va="center", fontsize=8.5,
+                fontweight="bold", color=col)
+        ax.text(11.0, 7.65 - i * 0.55, d, va="center", fontsize=7.5, color="#444444")
+
+    # ════════════════════════════════════════════════════════════════════════
+    # SECCIÓN 5 — CIUDADES Y OUTPUT
+    # ════════════════════════════════════════════════════════════════════════
+    _arrow(W / 2, 4.7, W / 2, 4.45)
+    _box(0.3, 0.3, W - 0.6, 3.85, "#1A1A2E", alpha=0.07, radius=0.14, lw=1.5)
+    _section_title(0.65, 3.9, "5 · Resultados: 3 ciudades × 9 motores × cold/warm", "#1A1A2E", size=11)
+
+    cities = [
+        ("Osaka\nQ35765",         "~200 K check-ins",  "RRF · Hit@10 = 0.479",  "#FF6B35"),
+        ("Istanbul\nQ406",        "~40 K check-ins",   "Markov · Hit@10 = 0.294","#8338EC"),
+        ("Petaling Jaya\nQ864965","~35 K check-ins",   "RRF · Hit@10 = 0.439",  "#06A77D"),
+    ]
+    cw = (W - 1.4) / 3 - 0.15
+    for ci, (name, data, best, col) in enumerate(cities):
+        cx = 0.65 + ci * (cw + 0.15)
+        _box(cx, 0.5, cw, 3.0, col, alpha=0.12, lw=1.6)
+        ax.text(cx + cw / 2, 3.2, name, ha="center", va="center",
+                fontsize=10, fontweight="bold", color=col)
+        ax.text(cx + cw / 2, 2.7, data, ha="center", va="center",
+                fontsize=8.5, color="#444444")
+        _box(cx + 0.1, 0.7, cw - 0.2, 0.80, col, alpha=0.22, lw=1.2)
+        ax.text(cx + cw / 2, 1.12, f"Mejor: {best}", ha="center", va="center",
+                fontsize=8, fontweight="bold", color=col)
+        ax.text(cx + cw / 2, 1.82, "JSON con métricas por modo\n+ cold/warm breakdown",
+                ha="center", va="center", fontsize=7.5, color="#555555")
+
+    ax.set_title("Sistema de evaluación offline del recomendador turístico",
+                 fontsize=15, fontweight="bold", pad=10, color="#1A1A2E")
+    fig.savefig(_save("fig_20_eval_protocolo.png"), dpi=300, bbox_inches="tight")
+    plt.close(fig)
+
+
 def _figure_registry() -> dict[str, Callable[[], None]]:
     return {
         "fig_01": fig_01_pipeline_sistema,
@@ -1226,6 +1479,7 @@ def _figure_registry() -> dict[str, Callable[[], None]]:
         "fig_17": fig_17_long_tail_usuarios,
         "fig_18": fig_18_heatmap_temporal,
         "fig_19": fig_19_longitud_trails,
+        "fig_20": fig_20_eval_protocolo,
     }
 
 
