@@ -251,7 +251,7 @@ flowchart TD
     class DB db
 ```
 
-## ?? Pipeline de scoring por petici?n
+## Pipeline de scoring por petición
 
 ```mermaid
 sequenceDiagram
@@ -279,7 +279,6 @@ sequenceDiagram
     API-->>FE: {variantes: history, inputs, location, full}
     FE-->>U: Mapa con ruta + lista POIs
 ```
-
 
 ## 🧠 Flujo de decisión por tipo de usuario
 

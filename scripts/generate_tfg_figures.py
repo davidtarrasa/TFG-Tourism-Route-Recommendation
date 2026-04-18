@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
+import sys
 import traceback
 from collections import Counter
 from datetime import datetime
@@ -16,6 +18,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import psycopg
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+SRC_DIR = ROOT_DIR / "src"
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
+from recommender.category_intents import INCONCLUSIVE, INTENTS, classify_category_intent
 
 try:
     import tomllib
@@ -145,53 +156,33 @@ def _category_palette(categories: Iterable[str]) -> dict[str, tuple[float, float
     return {c: cmap(i) for i, c in enumerate(cats)}
 
 
+_INTENT_DISPLAY = {
+    "food": "Food",
+    "culture": "Culture",
+    "nature": "Nature",
+    "nightlife": "Nightlife",
+    "shopping": "Shopping",
+    "service": "Service",
+    "health": "Health",
+    "entertainment": "Entertainment",
+    "transport": "Transport",
+    "relaxation": "Relaxation",
+    "family": "Family",
+    "sports": "Sports",
+    INCONCLUSIVE: "Inconclusive",
+}
+
+_INTENT_DISPLAY_ORDER = [_INTENT_DISPLAY[i] for i in INTENTS] + [_INTENT_DISPLAY[INCONCLUSIVE]]
+
+
 def _map_to_broad_category(cat: str) -> str:
-    s = str(cat or "").strip().lower()
-    if not s:
-        return "Other"
-
-    def has_any(terms: list[str]) -> bool:
-        return any(term in s for term in terms)
-
-    if has_any(
-        [
-            "restaurant",
-            "food",
-            "cafe",
-            "bar",
-            "bakery",
-            "ramen",
-            "sushi",
-            "izakaya",
-            "pizza",
-            "burger",
-            "curry",
-            "bbq",
-            "noodle",
-            "donburi",
-            "yakitori",
-        ]
-    ):
-        return "Food"
-    if has_any(["shop", "store", "market", "mall", "clothing", "fashion", "electronics", "book", "pharmacy"]):
-        return "Shop"
-    if has_any(["museum", "gallery", "temple", "shrine", "castle", "palace", "art", "culture", "heritage"]):
-        return "Museum/Culture"
-    if has_any(["park", "garden", "nature", "mountain", "trail", "outdoor", "lake", "river", "beach"]):
-        return "Park/Nature"
-    if has_any(["entertainment", "theater", "cinema", "game", "arcade", "bowling", "karaoke", "amusement"]):
-        return "Entertainment"
-    if has_any(["station", "airport", "terminal", "bus", "subway", "train", "port"]):
-        return "Transport"
-    if has_any(["hotel", "hostel", "boarding", "accommodation", "inn", "lodge"]):
-        return "Hotel/Stay"
-    if has_any(["sport", "gym", "fitness", "pool", "golf", "race"]):
-        return "Sport"
-    if has_any(["service", "office", "bank", "clinic", "hospital", "repair"]):
-        return "Service"
-    if has_any(["nightclub", "lounge", "club"]):
-        return "Nightlife"
-    return "Other"
+    raw = str(cat or "").strip()
+    if not raw:
+        return _INTENT_DISPLAY[INCONCLUSIVE]
+    intent, _, _ = classify_category_intent(raw, use_semantic=False)
+    if intent not in INTENTS and intent != INCONCLUSIVE:
+        intent = INCONCLUSIVE
+    return _INTENT_DISPLAY.get(intent, _INTENT_DISPLAY[INCONCLUSIVE])
 
 
 def _build_markov_transition(visits: pd.DataFrame, pois: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
@@ -234,6 +225,109 @@ def _safe_write_plotly_png(fig, out_png: Path):
         )
         fig_fallback.savefig(out_png, dpi=300, bbox_inches="tight")
         plt.close(fig_fallback)
+
+
+def _save_sankey_fallback_png(
+    labels: list[str],
+    source: list[int],
+    target: list[int],
+    value: list[int],
+    out_png: Path,
+    title: str,
+) -> None:
+    if not labels or not value:
+        raise RuntimeError("No hay datos para generar fallback estático de Sankey.")
+
+    def _stage(lbl: str) -> int:
+        m = re.search(r"(\d+)\s*$", str(lbl))
+        if m:
+            return int(m.group(1))
+        low = str(lbl).lower()
+        if "pos1" in low:
+            return 1
+        if "pos2" in low:
+            return 2
+        if "pos3" in low:
+            return 3
+        return 2
+
+    def _name(lbl: str) -> str:
+        txt = re.sub(r"\s*[→\-]?\s*\d+\s*$", "", str(lbl)).strip()
+        txt = txt.replace("(pos1)", "").replace("(pos2)", "").replace("(pos3)", "").strip()
+        return txt or str(lbl)
+
+    n = len(labels)
+    out_sum = np.zeros(n, dtype=float)
+    in_sum = np.zeros(n, dtype=float)
+    for s, t, v in zip(source, target, value):
+        out_sum[s] += float(v)
+        in_sum[t] += float(v)
+    totals = np.maximum(out_sum, in_sum)
+    totals[totals <= 0] = 1.0
+
+    stages = {}
+    for idx, lbl in enumerate(labels):
+        stages.setdefault(_stage(lbl), []).append(idx)
+    stage_keys = sorted(stages.keys())
+    x_positions = {st: i / (max(1, len(stage_keys) - 1)) * 0.78 + 0.11 for i, st in enumerate(stage_keys)}
+
+    node_pos = {}
+    for st in stage_keys:
+        nodes = sorted(stages[st], key=lambda i: totals[i], reverse=True)
+        ys = np.linspace(0.88, 0.12, num=len(nodes)) if len(nodes) > 1 else np.array([0.5])
+        for i, y in zip(nodes, ys):
+            node_pos[i] = (x_positions[st], float(y))
+
+    vmax = max(value) if value else 1
+    cmap = plt.cm.Blues
+
+    fig, ax = plt.subplots(figsize=(13, 8))
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.axis("off")
+
+    for s, t, v in sorted(zip(source, target, value), key=lambda x: x[2]):
+        x0, y0 = node_pos[s]
+        x1, y1 = node_pos[t]
+        w = 1.2 + 10.0 * (float(v) / float(vmax))
+        color = cmap(0.25 + 0.65 * (float(v) / float(vmax)))
+        edge = patches.FancyArrowPatch(
+            (x0 + 0.03, y0),
+            (x1 - 0.03, y1),
+            arrowstyle="-",
+            connectionstyle="arc3,rad=0.10",
+            linewidth=w,
+            color=color,
+            alpha=0.55,
+        )
+        ax.add_patch(edge)
+
+    node_max = float(np.max(totals))
+    for idx, lbl in enumerate(labels):
+        x, y = node_pos[idx]
+        size = 0.026 + 0.03 * (totals[idx] / (node_max + 1e-12))
+        rect = patches.FancyBboxPatch(
+            (x - size * 0.6, y - size * 0.34),
+            size * 1.2,
+            size * 0.68,
+            boxstyle="round,pad=0.01,rounding_size=0.01",
+            linewidth=0.8,
+            edgecolor="#1f3b73",
+            facecolor="#3f6db5",
+            alpha=0.95,
+        )
+        ax.add_patch(rect)
+        align = "right" if x > 0.65 else ("left" if x < 0.35 else "center")
+        tx = x - size * 0.85 if align == "right" else (x + size * 0.85 if align == "left" else x)
+        ax.text(tx, y, _name(lbl), va="center", ha=align, fontsize=9, color="#0d1b2a")
+
+    sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=min(value), vmax=max(value)))
+    sm.set_array([])
+    cbar = fig.colorbar(sm, ax=ax, fraction=0.03, pad=0.02)
+    cbar.set_label("Frecuencia de transición")
+    ax.set_title(title + " (fallback PNG estático)", fontsize=13, fontweight="bold")
+    fig.savefig(out_png, dpi=300, bbox_inches="tight")
+    plt.close(fig)
 
 
 def fig_01_pipeline_sistema():
@@ -355,20 +449,8 @@ def fig_02_pois_mapa_categorias():
     pois = pois.dropna(subset=["lat", "lon"]).copy()
     pois["category_broad"] = pois["primary_category"].map(_map_to_broad_category)
     pois["rating"] = pd.to_numeric(pois["rating"], errors="coerce").fillna(pois["rating"].median() if len(pois) else 1.0)
-    broad_order = [
-        "Food",
-        "Shop",
-        "Museum/Culture",
-        "Park/Nature",
-        "Entertainment",
-        "Transport",
-        "Hotel/Stay",
-        "Sport",
-        "Service",
-        "Nightlife",
-        "Other",
-    ]
-    cmap = plt.cm.get_cmap("Set3", 12)
+    broad_order = _INTENT_DISPLAY_ORDER
+    cmap = plt.cm.get_cmap("Set3", len(broad_order))
     palette = {cat: cmap(i) for i, cat in enumerate(broad_order)}
     gdf = gpd.GeoDataFrame(pois, geometry=gpd.points_from_xy(pois["lon"], pois["lat"]), crs="EPSG:4326").to_crs(3857)
     x = gdf.geometry.x.values
@@ -489,12 +571,12 @@ def fig_04_hexbin_rating():
         gdf.geometry.x.values,
         gdf.geometry.y.values,
         C=gdf["rating"].values,
-        gridsize=65,
+        gridsize=95,
         cmap="YlOrRd",
         reduce_C_function=np.mean,
         mincnt=2,
     )
-    hb.set_alpha(0.58)
+    hb.set_alpha(0.46)
     ax.set_xlim(x0 - padx, x1 + padx)
     ax.set_ylim(y0 - pady, y1 + pady)
     ctx.add_basemap(ax, source=ctx.providers.CartoDB.Positron, zoom=12)
@@ -523,7 +605,9 @@ def fig_05_tres_ciudades():
             ax.set_title(f"{CITY_META[city_qid]['name']} (sin datos)")
             ax.axis("off")
             continue
-        palette = _category_palette(pois["primary_category"])
+        pois = pois.copy()
+        pois["category_broad"] = pois["primary_category"].map(_map_to_broad_category)
+        palette = _category_palette(pois["category_broad"])
         gdf = gpd.GeoDataFrame(pois, geometry=gpd.points_from_xy(pois["lon"], pois["lat"]), crs="EPSG:4326").to_crs(3857)
         x = gdf.geometry.x.values
         y = gdf.geometry.y.values
@@ -531,16 +615,16 @@ def fig_05_tres_ciudades():
         y0, y1 = np.quantile(y, [0.01, 0.99])
         padx = (x1 - x0) * 0.12
         pady = (y1 - y0) * 0.12
-        for cat, grp in gdf.groupby("primary_category"):
+        for cat, grp in gdf.groupby("category_broad"):
             grp.plot(ax=ax, color=palette.get(cat, "#666"), markersize=7, alpha=0.65)
         ax.set_xlim(x0 - padx, x1 + padx)
         ax.set_ylim(y0 - pady, y1 + pady)
-        ax.set_aspect("equal", adjustable="box")
+        ax.set_aspect("auto")
         ctx.add_basemap(ax, source=ctx.providers.CartoDB.Positron, zoom=11)
         ax.set_title(CITY_META[city_qid]["name"], fontsize=12, fontweight="bold")
         ax.set_axis_off()
     fig.suptitle("Distribución de POIs por ciudad de estudio", fontsize=17, fontweight="bold")
-    fig.subplots_adjust(left=0.02, right=0.985, top=0.90, bottom=0.03, wspace=0.04)
+    fig.subplots_adjust(left=0.01, right=0.992, top=0.90, bottom=0.03, wspace=0.015)
     fig.savefig(_save("fig_05_tres_ciudades.png"), dpi=300, bbox_inches="tight")
     plt.close(fig)
 
@@ -577,15 +661,23 @@ def fig_07_markov_grafo():
         visits = load_visits(conn, "Q35765")
         pois = load_pois(conn, "Q35765")
     mat, freq = _build_markov_transition(visits, pois)
-    threshold = 0.05
+    threshold = 0.03
+    min_edges_per_node = 2
+    min_edges_transport = 3
     G = nx.DiGraph()
     for cat in mat.index:
         G.add_node(cat)
     for i in mat.index:
-        for j in mat.columns:
-            w = float(mat.loc[i, j])
-            if w >= threshold and i != j:
-                G.add_edge(i, j, weight=w)
+        row = mat.loc[i].drop(labels=[i], errors="ignore")
+        row = row[row > 0].sort_values(ascending=False)
+        if row.empty:
+            continue
+        min_keep = min_edges_transport if str(i).lower() == "transport" else min_edges_per_node
+        keep = row[row >= threshold]
+        if len(keep) < min_keep:
+            keep = row.head(min_keep)
+        for j, w in keep.items():
+            G.add_edge(i, j, weight=float(w))
     if G.number_of_edges() == 0:
         raise RuntimeError("No hay aristas >= threshold para fig_07.")
 
@@ -622,7 +714,7 @@ def fig_07_markov_grafo():
     sm.set_array([])
     plt.colorbar(sm, ax=ax, label="Probabilidad de transición", shrink=0.7)
 
-    ax.set_title("Grafo de transición Markov (threshold=0.05, Osaka)",
+    ax.set_title("Grafo de transición Markov (base>=0.03 + top-N por categoría, Osaka)",
                  fontsize=14, fontweight="bold")
     ax.axis("off")
     fig.savefig(_save("fig_07_markov_grafo.png"), dpi=300, bbox_inches="tight")
@@ -670,7 +762,19 @@ def fig_08_sankey_rutas():
     )
     fig.update_layout(title_text="Sankey de transiciones (pos1→pos2→pos3) en trails de Osaka", font_size=11)
     fig.write_html(str(_save("fig_08_sankey_rutas.html")))
-    _safe_write_plotly_png(fig, _save("fig_08_sankey_rutas.png"))
+    out_png = _save("fig_08_sankey_rutas.png")
+    try:
+        fig.write_image(str(out_png), scale=2, width=1400, height=900)
+    except Exception:
+        log(f"No se pudo exportar PNG con plotly/kaleido: {out_png.name}. Generando fallback estático.")
+        _save_sankey_fallback_png(
+            labels=labels,
+            source=source,
+            target=target,
+            value=value,
+            out_png=out_png,
+            title="Sankey de transiciones (pos1→pos2→pos3) en trails de Osaka",
+        )
 
 
 def _extract_word2vec_vectors(model_obj, keys: list[str]) -> tuple[np.ndarray, list[str]]:
@@ -926,7 +1030,6 @@ def fig_14_radar_chart():
     metrics = ["hit", "precision", "recall", "ndcg", "novelty", "diversity"]
     frames = [load_eval_results(qid) for qid in CITY_META]
     d = pd.concat(frames, ignore_index=True)
-    d = d[d["mode"] != "random"].copy()
     agg = d.groupby("mode")[metrics].mean().reset_index()
     if agg.empty:
         raise RuntimeError("Sin datos para radar chart.")
@@ -940,12 +1043,17 @@ def fig_14_radar_chart():
     for _, row in agg.iterrows():
         vals = [float(row[m]) for m in labels]
         vals += vals[:1]
-        ax.plot(angles, vals, linewidth=2, label=row["mode"])
-        ax.fill(angles, vals, alpha=0.10)
+        mode_name = str(row["mode"])
+        if mode_name == "random":
+            ax.plot(angles, vals, linewidth=2.2, linestyle="--", color="#444444", label="random (baseline)")
+            ax.fill(angles, vals, alpha=0.06, color="#999999")
+        else:
+            ax.plot(angles, vals, linewidth=2, label=mode_name)
+            ax.fill(angles, vals, alpha=0.10)
     ax.set_xticks(angles[:-1])
     ax.set_xticklabels(labels)
     ax.set_ylim(0, 1)
-    ax.set_title("Radar multi-métrica por engine (media 3 ciudades)", fontsize=14, fontweight="bold")
+    ax.set_title("Radar multi-métrica por engine (media 3 ciudades, incluye baseline random)", fontsize=14, fontweight="bold")
     ax.legend(loc="upper right", bbox_to_anchor=(1.24, 1.1))
     fig.savefig(_save("fig_14_radar_chart.png"), dpi=300, bbox_inches="tight")
     plt.close(fig)
@@ -953,26 +1061,39 @@ def fig_14_radar_chart():
 
 def fig_15_curvas_metricas_k():
     df = load_eval_results("Q35765")
-    modes = sorted(df["mode"].unique())
-    ks = np.arange(1, 21)
+    metrics = ["precision", "recall", "ndcg"]
+    for m in metrics:
+        if m not in df.columns:
+            raise RuntimeError(f"No hay métrica '{m}' en resultados de evaluación.")
 
-    fig, axes = plt.subplots(1, 3, figsize=(16, 5))
-    for ax, metric in zip(axes, ["precision", "recall", "ndcg"]):
-        for mode in modes:
-            base = float(df.loc[df["mode"] == mode, metric].iloc[0]) if metric in df.columns else 0.05
-            if metric == "precision":
-                curve = np.clip(base * (1.75 - 0.04 * ks), 0, 1)
-            elif metric == "recall":
-                curve = np.clip(base * (0.35 + 0.035 * ks), 0, 1)
-            else:
-                curve = np.clip(base * (0.6 + 0.03 * ks), 0, 1)
-            ax.plot(ks, curve, label=mode, linewidth=1.8)
-        ax.set_title(f"{metric}@k")
-        ax.set_xlabel("k")
-        ax.set_ylabel(metric)
-        ax.grid(alpha=0.3)
-    axes[0].legend(fontsize=8)
-    fig.suptitle("Curvas de métricas vs k (simulación realista al no haber serie completa)", fontsize=13, fontweight="bold")
+    preferred = ["content", "item", "markov", "embed", "als", "hybrid", "random"]
+    modes_existing = list(df["mode"].astype(str).unique())
+    modes = [m for m in preferred if m in modes_existing] + [m for m in sorted(modes_existing) if m not in preferred]
+
+    x = np.arange(len(modes))
+    width = 0.24
+    metric_labels = {"precision": "Precision@20", "recall": "Recall@20", "ndcg": "nDCG@20"}
+    metric_colors = {"precision": "#4E79A7", "recall": "#F28E2B", "ndcg": "#59A14F"}
+
+    fig, ax = plt.subplots(figsize=(14, 6))
+    for i, metric in enumerate(metrics):
+        vals = [float(df.loc[df["mode"] == mode, metric].iloc[0]) for mode in modes]
+        ax.bar(
+            x + (i - 1) * width,
+            vals,
+            width=width,
+            label=metric_labels[metric],
+            color=metric_colors[metric],
+            alpha=0.9,
+        )
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(modes, rotation=30, ha="right")
+    ax.set_ylabel("score")
+    ax.set_xlabel("motor")
+    ax.grid(axis="y", alpha=0.25)
+    ax.legend()
+    fig.suptitle("Métricas de ranking a k=20 por motor (Osaka)", fontsize=13, fontweight="bold")
     fig.savefig(_save("fig_15_curvas_metricas_k.png"), dpi=300, bbox_inches="tight")
     plt.close(fig)
 
