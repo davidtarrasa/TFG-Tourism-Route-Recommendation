@@ -22,14 +22,6 @@ function parseCoord(value) {
   return Number.isFinite(n) ? n : null;
 }
 
-function parseCoordLoose(value) {
-  if (value === null || value === undefined) return null;
-  const s = String(value).trim().replace(",", ".");
-  if (!s) return null;
-  const n = Number(s);
-  return Number.isFinite(n) ? n : null;
-}
-
 function haversineKm(lat1, lon1, lat2, lon2) {
   const R = 6371;
   const toRad = (x) => (x * Math.PI) / 180;
@@ -216,10 +208,10 @@ function withLegDistances(pois) {
     if (Number.isFinite(Number(poi.distance_km))) return poi;
     if (i === 0) return { ...poi, distance_km: null, leg_distance_km: null };
     const prev = pois[i - 1];
-    const prevLat = parseCoordLoose(prev?.lat);
-    const prevLon = parseCoordLoose(prev?.lon);
-    const lat = parseCoordLoose(poi?.lat);
-    const lon = parseCoordLoose(poi?.lon);
+    const prevLat = parseCoord(prev?.lat);
+    const prevLon = parseCoord(prev?.lon);
+    const lat = parseCoord(poi?.lat);
+    const lon = parseCoord(poi?.lon);
     const ok =
       prevLat != null &&
       prevLon != null &&
@@ -266,8 +258,8 @@ async function osrmLeg(start, end) {
     "?overview=full&geometries=geojson";
   const r = await fetch(url);
   if (!r.ok) return null;
-  const payload = await r.json();
-  const coords = payload?.routes?.[0]?.geometry?.coordinates || [];
+  const json = await r.json();
+  const coords = json?.routes?.[0]?.geometry?.coordinates || [];
   if (!coords.length) return null;
   return coords.map((c) => [Number(c[1]), Number(c[0])]);
 }
@@ -300,9 +292,8 @@ function renderLegend(latlngs) {
     return;
   }
   routeLegend.classList.remove("hidden");
-  const maxShow = legs;
   const rows = [];
-  for (let i = 0; i < maxShow; i += 1) {
+  for (let i = 0; i < legs; i += 1) {
     const checked = segmentLayers.visible[i] !== false ? "checked" : "";
     rows.push(
       `<label class="route-legend-row"><input class="route-legend-check" type="checkbox" data-seg="${i}" ${checked} /><span class="route-legend-color" style="background:${segmentColorBlue(
@@ -345,8 +336,8 @@ function renderMap(pois, cityName, variant) {
   }
   const latlngs = pois
     .map((p) => {
-      const lat = parseCoordLoose(p?.lat);
-      const lon = parseCoordLoose(p?.lon);
+      const lat = parseCoord(p?.lat);
+      const lon = parseCoord(p?.lon);
       if (lat == null || lon == null) return null;
       return [lat, lon];
     })
@@ -394,8 +385,8 @@ function renderMap(pois, cityName, variant) {
   renderLegend(latlngs);
 
   pois.forEach((poi) => {
-    const lat = parseCoordLoose(poi?.lat);
-    const lon = parseCoordLoose(poi?.lon);
+    const lat = parseCoord(poi?.lat);
+    const lon = parseCoord(poi?.lon);
     if (lat == null || lon == null) return;
     const icon = L.divIcon({
       className: "order-badge",
@@ -715,7 +706,6 @@ if (applyMapPickerBtn) applyMapPickerBtn.addEventListener("click", applyMapPicke
 if (mapStyleSelect) mapStyleSelect.addEventListener("change", (e) => setBaseLayer(e.target.value));
 if (mapFullscreenBtn) mapFullscreenBtn.addEventListener("click", toggleMapFullscreen);
 document.addEventListener("fullscreenchange", onFullscreenChanged);
-window.openMapPickerUI = openMapPicker;
 
 refreshSavedBtn.addEventListener("click", () => {
   loadSavedRoutes().catch((err) => setError(`No se pudieron cargar rutas guardadas: ${err.message}`));
