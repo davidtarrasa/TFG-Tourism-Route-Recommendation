@@ -4,7 +4,7 @@ Embeddings secuenciales (p.ej., Word2Vec sobre rutas):
 - Obtiene vecinos similares al historial del usuario o al POI actual.
 """
 
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Optional
 
 
 def train_embeddings(
@@ -52,9 +52,19 @@ def similar_pois(model, poi_id: str, topn: int = 20) -> List[Tuple[str, float]]:
     return model.wv.most_similar(poi_id, topn=topn)
 
 
-def score_embeddings_next(model, current_poi: str, topn: int = 50) -> Dict[str, float]:
-    """Score "next POI" usando solo el POI actual (secuencial)."""
+def score_embeddings_next(
+    model, current_poi: str, topn: int = 50, user_items: Optional[List[str]] = None
+) -> Dict[str, float]:
+    """Score "next POI" usando solo el POI actual (secuencial).
+
+    Si current_poi no está en el vocabulario (OOV), hace backoff al contexto
+    reciente del usuario — evita devolver {} en ciudades con datos escasos.
+    """
     if current_poi not in model.wv:
+        if user_items:
+            known = [str(x) for x in user_items if x and str(x) in model.wv and str(x) != current_poi]
+            if known:
+                return score_embeddings_context(model, known[-3:], topn=topn)
         return {}
     out: Dict[str, float] = {}
     for pid, sim in model.wv.most_similar(current_poi, topn=topn):

@@ -251,6 +251,8 @@ def main() -> None:
                         "hybrid",
                         "content",
                         "random",
+                        "popular",
+                        "rrf",
                         "--use-embeddings",
                         "--embeddings-path",
                         emb_path,

@@ -7,16 +7,23 @@ import scipy.sparse as sp
 
 
 def build_interactions(visits) -> Tuple[sp.csr_matrix, Dict[int, int], Dict[str, int], List[str]]:
-    """Construye matriz usuario-item (implícita) y mappings."""
+    """Construye matriz usuario-item ponderada por frecuencia de visitas."""
     users = visits["user_id"].astype(int).unique()
     items = visits["venue_id"].astype(str).unique()
     user_to_idx = {u: i for i, u in enumerate(users)}
     item_to_idx = {p: i for i, p in enumerate(items)}
     idx_to_item = list(items)
 
-    rows = visits["user_id"].map(user_to_idx).to_numpy()
-    cols = visits["venue_id"].map(item_to_idx).to_numpy()
-    data = np.ones_like(rows, dtype=np.float32)
+    # Agrupa por (user, item) y cuenta cuántas veces visitó cada POI.
+    # Un usuario que visita un POI 3 veces aporta señal más fuerte que uno que va una vez.
+    visit_counts = (
+        visits.groupby(["user_id", "venue_id"])
+        .size()
+        .reset_index(name="count")
+    )
+    rows = visit_counts["user_id"].map(user_to_idx).to_numpy()
+    cols = visit_counts["venue_id"].map(item_to_idx).to_numpy()
+    data = visit_counts["count"].to_numpy(dtype=np.float32)
     mat = sp.coo_matrix((data, (rows, cols)), shape=(len(users), len(items))).tocsr()
     return mat, user_to_idx, item_to_idx, idx_to_item
 

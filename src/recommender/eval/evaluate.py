@@ -415,6 +415,8 @@ def eval_modes(
         cases = cases[:max_users]
 
     metrics_acc = defaultdict(list)
+    group_metrics_acc: Dict = defaultdict(list)
+    cold_warm_users: Dict[str, set] = {"cold": set(), "warm": set()}
     users_evaluated = set()
     users_skipped_all_truth_seen = 0
 
@@ -483,6 +485,7 @@ def eval_modes(
             current_poi = str(user_train.iloc[-1]["venue_id"])
             prev_poi = str(user_train.iloc[-2]["venue_id"]) if len(user_train) >= 2 else None
 
+        user_group = "cold" if len(user_items) < 5 else "warm"
         content_scores = score_content(user_items, tfidf_ids, tfidf_matrix)
         co_scores = score_co_visitation(user_items, co_mat, id_to_idx, idx_to_id)
         markov_scores = dict(next_poi_order2(prev_poi, str(current_poi), trans_poi2, trans_poi, topn=2000, backoff=0.3))
@@ -496,7 +499,7 @@ def eval_modes(
             if len(ctx) >= 2:
                 embed_scores = score_embeddings_context(embed_model, ctx, topn=topn)
             else:
-                embed_scores = score_embeddings_next(embed_model, str(current_poi), topn=topn)
+                embed_scores = score_embeddings_next(embed_model, str(current_poi), topn=topn, user_items=seq_items)
             embed_scores = _apply_hub_penalty(embed_scores, item_counts=item_counts, alpha=float(emb_cfg.get("hub_alpha", 0.0)))
         als_scores = {}
         if als_obj:
@@ -604,17 +607,43 @@ def eval_modes(
                 cm = compute_category_metrics(rec_ids, truth_items, k, poi_primary_map=poi_primary_map)
                 novelty = _novelty_at_k(rec_ids, item_counts=item_counts)
                 diversity = _diversity_at_k(rec_ids, poi_primary_map=poi_primary_map)
-                metrics_acc[(mode, "hit")].append(float(m.get("hit", 0.0)))
-                metrics_acc[(mode, "precision")].append(float(m.get("precision", 0.0)))
-                metrics_acc[(mode, "recall")].append(float(m.get("recall", 0.0)))
-                metrics_acc[(mode, "ndcg")].append(float(m.get("ndcg", 0.0)))
-                metrics_acc[(mode, "cat_hit")].append(float(cm.get("hit", 0.0)))
-                metrics_acc[(mode, "cat_precision")].append(float(cm.get("precision", 0.0)))
-                metrics_acc[(mode, "cat_recall")].append(float(cm.get("recall", 0.0)))
-                metrics_acc[(mode, "cat_ndcg")].append(float(cm.get("ndcg", 0.0)))
-                metrics_acc[(mode, "novelty")].append(novelty)
-                metrics_acc[(mode, "diversity")].append(diversity)
+                for _mk, _mv in [("hit", m.get("hit", 0.0)), ("precision", m.get("precision", 0.0)),
+                                  ("recall", m.get("recall", 0.0)), ("ndcg", m.get("ndcg", 0.0)),
+                                  ("cat_hit", cm.get("hit", 0.0)), ("cat_precision", cm.get("precision", 0.0)),
+                                  ("cat_recall", cm.get("recall", 0.0)), ("cat_ndcg", cm.get("ndcg", 0.0)),
+                                  ("novelty", novelty), ("diversity", diversity)]:
+                    metrics_acc[(mode, _mk)].append(float(_mv))
+                    group_metrics_acc[(mode, _mk, user_group)].append(float(_mv))
                 continue
+            elif mode == "popular":
+                # Baseline de popularidad global: recomienda los POIs más visitados en train.
+                if not candidate_pool:
+                    continue
+                rec_ids = sorted(candidate_pool, key=lambda x: item_counts.get(x, 0), reverse=True)[:k]
+                m = compute_metrics(rec_ids, truth_items, k)
+                cm = compute_category_metrics(rec_ids, truth_items, k, poi_primary_map=poi_primary_map)
+                novelty = _novelty_at_k(rec_ids, item_counts=item_counts)
+                diversity = _diversity_at_k(rec_ids, poi_primary_map=poi_primary_map)
+                for _mk, _mv in [("hit", m.get("hit", 0.0)), ("precision", m.get("precision", 0.0)),
+                                  ("recall", m.get("recall", 0.0)), ("ndcg", m.get("ndcg", 0.0)),
+                                  ("cat_hit", cm.get("hit", 0.0)), ("cat_precision", cm.get("precision", 0.0)),
+                                  ("cat_recall", cm.get("recall", 0.0)), ("cat_ndcg", cm.get("ndcg", 0.0)),
+                                  ("novelty", novelty), ("diversity", diversity)]:
+                    metrics_acc[(mode, _mk)].append(float(_mv))
+                    group_metrics_acc[(mode, _mk, user_group)].append(float(_mv))
+                continue
+            elif mode == "rrf":
+                # Reciprocal Rank Fusion: combina los rankings de todos los modelos
+                # sin necesitar pesos manuales. score = Σ 1/(k+rank_i), k=60.
+                def _ranks(scores: Dict[str, float]) -> Dict[str, int]:
+                    return {fid: i for i, fid in enumerate(sorted(scores, key=scores.__getitem__, reverse=True))}
+                all_model_ranks = [_ranks(s) for s in [content_scores, co_scores, markov_scores, embed_scores, als_scores]]
+                rrf_k = 60
+                all_rrf_ids = set(content_scores) | set(co_scores) | set(markov_scores) | set(embed_scores) | set(als_scores)
+                rec_scores = {
+                    fid: sum(1.0 / (rrf_k + r.get(fid, len(r)) + 1) for r in all_model_ranks)
+                    for fid in all_rrf_ids
+                }
             else:
                 continue
 
@@ -628,25 +657,33 @@ def eval_modes(
             diversity = _diversity_at_k(rec_ids, poi_primary_map=poi_primary_map)
 
             # Main metrics requested by tutor (+ hit for quick compatibility checks).
-            metrics_acc[(mode, "hit")].append(float(m.get("hit", 0.0)))
-            metrics_acc[(mode, "precision")].append(float(m.get("precision", 0.0)))
-            metrics_acc[(mode, "recall")].append(float(m.get("recall", 0.0)))
-            metrics_acc[(mode, "ndcg")].append(float(m.get("ndcg", 0.0)))
-            metrics_acc[(mode, "cat_hit")].append(float(cm.get("hit", 0.0)))
-            metrics_acc[(mode, "cat_precision")].append(float(cm.get("precision", 0.0)))
-            metrics_acc[(mode, "cat_recall")].append(float(cm.get("recall", 0.0)))
-            metrics_acc[(mode, "cat_ndcg")].append(float(cm.get("ndcg", 0.0)))
-            metrics_acc[(mode, "novelty")].append(novelty)
-            metrics_acc[(mode, "diversity")].append(diversity)
+            for _mk, _mv in [("hit", m.get("hit", 0.0)), ("precision", m.get("precision", 0.0)),
+                              ("recall", m.get("recall", 0.0)), ("ndcg", m.get("ndcg", 0.0)),
+                              ("cat_hit", cm.get("hit", 0.0)), ("cat_precision", cm.get("precision", 0.0)),
+                              ("cat_recall", cm.get("recall", 0.0)), ("cat_ndcg", cm.get("ndcg", 0.0)),
+                              ("novelty", novelty), ("diversity", diversity)]:
+                metrics_acc[(mode, _mk)].append(float(_mv))
+                group_metrics_acc[(mode, _mk, user_group)].append(float(_mv))
         users_evaluated.add(uid)
+        cold_warm_users[user_group].add(uid)
 
     # Agregar métricas
     rows = []
     for (mode, metric), vals in metrics_acc.items():
         rows.append({"mode": mode, "metric": metric, "value": float(np.mean(vals)) if vals else 0.0, "n_users": len(vals)})
+
+    cold_warm_breakdown: Dict = {}
+    for (mode, metric, group), vals in group_metrics_acc.items():
+        cold_warm_breakdown.setdefault(mode, {}).setdefault(metric, {})[group] = (
+            float(np.mean(vals)) if vals else 0.0
+        )
+
     summary = {
         "users_evaluated": len(users_evaluated),
         "users_skipped_all_truth_seen": users_skipped_all_truth_seen,
+        "cold_users": len(cold_warm_users.get("cold", set())),
+        "warm_users": len(cold_warm_users.get("warm", set())),
+        "cold_warm_breakdown": cold_warm_breakdown,
     }
     return pd.DataFrame(rows), summary
 
@@ -677,7 +714,7 @@ def main():
         action="store_true",
         help="Entrena modelos SOLO con el split de train (más lento, sin fuga de información).",
     )
-    parser.add_argument("--modes", nargs="+", default=["hybrid", "content", "item", "markov", "embed", "als", "random"], help="Modos a evaluar")
+    parser.add_argument("--modes", nargs="+", default=["hybrid", "content", "item", "markov", "embed", "als", "random", "popular", "rrf"], help="Modos a evaluar")
     parser.add_argument("--output", help="Guardar resultados en JSON/CSV (según extensión)")
     args = parser.parse_args()
     cfg = load_config(DEFAULT_CONFIG_PATH, city_qid=args.city_qid)
@@ -736,6 +773,8 @@ def main():
         print("Sin métricas (¿sin usuarios válidos?).")
     else:
         print(f"Usuarios evaluados: {summary.get('users_evaluated', 0)}")
+        print(f"  cold (<5 visitas train): {summary.get('cold_users', 0)}")
+        print(f"  warm (>=5 visitas train): {summary.get('warm_users', 0)}")
         print(f"Usuarios saltados (test todo repetido): {summary.get('users_skipped_all_truth_seen', 0)}")
         print(df_metrics.pivot(index="mode", columns="metric", values="value"))
 
