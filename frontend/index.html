@@ -188,20 +188,21 @@
             <h2>Cómo funciona</h2>
           </div>
           <ul class="bullet-list">
-            <li><strong>Datos:</strong> check-ins (`std_2018`) y POIs de Foursquare enriquecidos en PostgreSQL.</li>
-            <li><strong>Motores:</strong> content-based, co-visitation, Markov secuencial y embeddings.</li>
-            <li><strong>Scoring híbrido:</strong> combinación de señales + re-ranking por distancia, restricciones y diversidad.</li>
-            <li><strong>Construcción de ruta:</strong> selección de candidatos y ordenación heurística por tramos.</li>
-            <li><strong>Salida:</strong> top-K de POIs, ruta ordenada y visualización en mapa.</li>
+            <li><strong>Datos:</strong> ~200 000 check-ins reales (Foursquare) y metadatos de POIs cargados en PostgreSQL para Osaka, Estambul y Petaling Jaya.</li>
+            <li><strong>9 motores:</strong> content-based (TF-IDF), co-visitation, Markov secuencial (orden 1/2), Word2Vec sobre trails, ALS colaborativo implícito, Hybrid ponderado y RRF (Reciprocal Rank Fusion).</li>
+            <li><strong>Scoring:</strong> cada motor genera puntuaciones independientes que se fusionan y re-rankean por distancia, preferencias y diversidad de categorías.</li>
+            <li><strong>Construcción de ruta:</strong> selección greedy del pool de candidatos con restricciones de tramos, seguida de ordenación NN + 2-opt.</li>
+            <li><strong>Evaluación offline:</strong> protocolo <em>last_trail_user</em> con métricas Hit@K, NDCG@K, Recall@K, novedad y diversidad; split frío/cálido por usuario.</li>
+            <li><strong>Salida:</strong> top-K POIs ordenados, GeoJSON y mapa interactivo con overlay de calles.</li>
           </ul>
           <div class="pipeline card">
-            <div class="pipeline__node">Datos<br /><small>visits + pois</small></div>
+            <div class="pipeline__node">Datos<br /><small>visits + pois (PostgreSQL)</small></div>
             <div class="pipeline__arrow">→</div>
-            <div class="pipeline__node">Features<br /><small>tfidf/cooc/transitions</small></div>
+            <div class="pipeline__node">Features<br /><small>TF-IDF · cooc · transiciones · Word2Vec · ALS</small></div>
             <div class="pipeline__arrow">→</div>
-            <div class="pipeline__node">Modelos<br /><small>content/item/markov/embed/als</small></div>
+            <div class="pipeline__node">Motores<br /><small>content · item · markov · embed · als · hybrid · rrf · popular</small></div>
             <div class="pipeline__arrow">→</div>
-            <div class="pipeline__node">Híbrido + Ruta</div>
+            <div class="pipeline__node">Ruta ordenada<br /><small>NN + 2-opt · GeoJSON · mapa</small></div>
           </div>
         </div>
       </section>
@@ -212,12 +213,14 @@
             <h2>Arquitectura</h2>
           </div>
           <div class="cards-grid">
-            <article class="mini-card"><h3>Database</h3><p>PostgreSQL</p></article>
-            <article class="mini-card"><h3>Backend</h3><p>FastAPI</p></article>
-            <article class="mini-card"><h3>Recommender</h3><p>Python</p></article>
-            <article class="mini-card"><h3>Frontend</h3><p>Web responsive</p></article>
-            <article class="mini-card"><h3>Map</h3><p>Leaflet + tiles</p></article>
-            <article class="mini-card"><h3>Deploy</h3><p>Docker Compose</p></article>
+            <article class="mini-card"><h3>Base de datos</h3><p>PostgreSQL · visits, pois, poi_categories, saved_routes</p></article>
+            <article class="mini-card"><h3>Backend</h3><p>FastAPI · /recommend · /multi-recommend · /saved-routes</p></article>
+            <article class="mini-card"><h3>Recomendador</h3><p>Python · 9 motores · scorer.py · route_planner + route_builder</p></article>
+            <article class="mini-card"><h3>Entrenamiento</h3><p>Word2Vec (gensim) · ALS implícito (implicit) · artifacts por ciudad</p></article>
+            <article class="mini-card"><h3>Frontend</h3><p>HTML/CSS/JS vanilla · multi-ruta · rutas guardadas</p></article>
+            <article class="mini-card"><h3>Mapa</h3><p>Leaflet · OSRM street overlay · GeoJSON · estilos satélite/light/OSM</p></article>
+            <article class="mini-card"><h3>Evaluación</h3><p>evaluate.py · evaluate_routes.py · protocolo last_trail_user</p></article>
+            <article class="mini-card"><h3>Infraestructura</h3><p>Docker Compose · benchmark_3cities.py · configs TOML por ciudad</p></article>
           </div>
         </div>
       </section>
@@ -225,27 +228,28 @@
       <section class="section" id="resultados">
         <div class="container">
           <div class="section__head">
-            <h2>Resultados / Evaluación</h2>
-            <p>Panel placeholder para métricas offline del recomendador.</p>
+            <h2>Resultados de evaluación</h2>
+            <p>Evaluación offline con protocolo <em>last_trail_user</em> (--fair), métrica Hit@10. Mejor modelo por ciudad destacado.</p>
           </div>
           <div class="metrics-grid">
-            <div class="metric card"><span>HitRate@K</span><strong>--</strong></div>
-            <div class="metric card"><span>Recall@K</span><strong>--</strong></div>
-            <div class="metric card"><span>MRR</span><strong>--</strong></div>
-            <div class="metric card"><span>NDCG</span><strong>--</strong></div>
-            <div class="metric card"><span>Diversidad</span><strong>--</strong></div>
-            <div class="metric card"><span>Distancia total</span><strong>--</strong></div>
+            <div class="metric card"><span>Osaka · mejor Hit@10</span><strong>0.479</strong><small>RRF</small></div>
+            <div class="metric card"><span>Estambul · mejor Hit@10</span><strong>0.294</strong><small>Markov</small></div>
+            <div class="metric card"><span>Petaling Jaya · mejor Hit@10</span><strong>0.439</strong><small>RRF</small></div>
+            <div class="metric card"><span>Motores evaluados</span><strong>9</strong><small>incl. RRF y Popular</small></div>
           </div>
           <div class="chart card">
-            <h3>Comparativa de modelos (placeholder)</h3>
+            <h3>Hit@10 por motor — Osaka (Q35765)</h3>
             <div class="bars">
-              <div class="bar" style="--v: 35"><span>content</span></div>
-              <div class="bar" style="--v: 62"><span>item</span></div>
-              <div class="bar" style="--v: 58"><span>markov</span></div>
-              <div class="bar" style="--v: 49"><span>embed</span></div>
-              <div class="bar" style="--v: 65"><span>als</span></div>
-              <div class="bar" style="--v: 72"><span>hybrid</span></div>
+              <div class="bar" style="--v: 15"><span>content</span></div>
+              <div class="bar" style="--v: 40"><span>item</span></div>
+              <div class="bar" style="--v: 43"><span>markov</span></div>
+              <div class="bar" style="--v: 30"><span>embed</span></div>
+              <div class="bar" style="--v: 34"><span>als</span></div>
+              <div class="bar" style="--v: 41"><span>hybrid</span></div>
+              <div class="bar" style="--v: 40"><span>popular</span></div>
+              <div class="bar" style="--v: 48"><span>rrf</span></div>
             </div>
+            <small style="display:block;margin-top:.5rem;color:var(--text-muted)">Valores × 100 sobre Hit@10 real (0–1). Protocolo last_trail_user, k=10, seed=42.</small>
           </div>
         </div>
       </section>
@@ -275,12 +279,12 @@
 
     <footer class="footer">
       <div class="container footer__content">
-        <p>Autor: David</p>
+        <p>Autor: David Tarrasa</p>
         <p>Tutor: Pablo</p>
         <nav>
-          <a href="#">GitHub</a>
+          <a href="https://github.com/davidtarrasa/TFG-Tourism-Route-Recommendation" target="_blank" rel="noopener">GitHub</a>
           <a href="#">Memoria (PDF)</a>
-          <a href="#">Contacto</a>
+          <a href="https://www.linkedin.com/in/davidtarrasa/" target="_blank" rel="noopener">Contacto</a>
         </nav>
       </div>
     </footer>
