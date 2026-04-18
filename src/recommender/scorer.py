@@ -236,7 +236,7 @@ def recommend(
                 prev_poi = str(user_items[-2])
             else:
                 prev_poi = str(user_items[-1])
-        markov_scores = dict(next_poi_order2(prev_poi, str(current_poi), trans_poi2, trans_poi, topn=2000, backoff=0.3))
+        markov_scores = dict(next_poi_order2(prev_poi, str(current_poi), trans_poi2, trans_poi, topn=2000, backoff=float(markov_cfg.get("backoff", 0.3))))
         # Si no hay transiciones POI→POI, usar transiciones de categoría del POI actual
         if not markov_scores:
             current_row = pois_df[pois_df["fsq_id"] == current_poi]

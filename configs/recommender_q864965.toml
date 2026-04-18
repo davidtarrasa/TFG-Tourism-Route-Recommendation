@@ -93,4 +93,5 @@ user_top_categories = 5
 [markov]
 # Penalize very popular POIs (hubs) in Markov recommendations.
 hub_alpha = 0
-backoff = 0.3
+# Petaling Jaya muestra secuencias razonablemente fuertes — reducimos backoff ligeramente.
+backoff = 0.25

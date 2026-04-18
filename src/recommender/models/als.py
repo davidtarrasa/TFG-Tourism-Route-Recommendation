@@ -1,5 +1,6 @@
 """ALS implícito para recomendaciones usuario-POI."""
 
+from collections import Counter
 from typing import Dict, List, Tuple
 
 import numpy as np
@@ -61,10 +62,15 @@ def score_als(
     if user_id in user_to_idx:
         uvec = model.user_factors[user_to_idx[user_id]]
     else:
-        idxs = [item_to_idx[x] for x in user_items if x in item_to_idx]
-        if not idxs:
+        # Cold-start: promedio ponderado por frecuencia de visitas
+        item_freq = Counter(user_items)
+        valid = [x for x in item_freq if x in item_to_idx]
+        if not valid:
             return {}
-        uvec = model.item_factors[idxs].mean(axis=0)
+        idxs = [item_to_idx[x] for x in valid]
+        weights = np.array([item_freq[x] for x in valid], dtype=np.float32)
+        weights /= weights.sum()
+        uvec = (model.item_factors[idxs] * weights.reshape(-1, 1)).sum(axis=0)
 
     scores_vec = np.dot(model.item_factors, uvec)
 

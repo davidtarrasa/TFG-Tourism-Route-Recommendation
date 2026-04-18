@@ -38,7 +38,7 @@ Important split controls:
 Example:
 
 ```bash
-python -m src.recommender.eval.evaluate --city-qid Q35765 --protocol last_trail_user --fair --visits-limit 120000 --k 20 --test-size 1 --min-train 2 --min-test-pois 4 --max-users 300 --seed 42 --modes embed item markov als hybrid content random --use-embeddings --embeddings-path src/recommender/cache/word2vec_q35765.joblib --use-als --als-path src/recommender/cache/als_q35765.joblib --output data/reports/eval_q35765_current.json
+python -m src.recommender.eval.evaluate --city-qid Q35765 --protocol last_trail_user --fair --visits-limit 120000 --k 20 --test-size 1 --min-train 2 --min-test-pois 4 --max-users 300 --seed 42 --modes embed item markov als hybrid content random popular rrf --use-embeddings --embeddings-path src/recommender/cache/word2vec_q35765.joblib --use-als --als-path src/recommender/cache/als_q35765.joblib --output data/reports/eval_q35765_current.json
 ```
 
 Reported metrics (per mode):
@@ -56,11 +56,13 @@ Reported metrics (per mode):
 
 Notes:
 
-- `random` is available as a trivial baseline and follows the same split/candidate/exclusion protocol as the rest.
-- All modes are evaluated with the same fixed seed item from test for the selected protocol.
+- `random` is a trivial random baseline; `popular` ranks by visit frequency across all users.
+- `rrf` applies Reciprocal Rank Fusion (`1/(60+rank)`) over all 5 base engine rankings — no trained artifact needed.
+- All modes use the same fixed seed item and split for fair comparison.
 - `--fair` retrains models on train split only (leak-free, slower).
-- without `--fair`, cached artifacts can be loaded (faster).
+- Without `--fair`, cached artifacts can be loaded (faster, but potential data leakage).
 - `--seed` controls sampled cases when limits apply.
+- Users with fewer than 5 train visits are classified as **cold**, the rest as **warm**. The output JSON includes a `cold_warm_breakdown` section with per-group metrics.
 
 ## 2) Route Evaluation (`evaluate_routes.py`)
 
@@ -96,8 +98,11 @@ Do not compare runs with different protocol/seed/limits as if they were equivale
 
 Typical outputs:
 
-- `data/reports/eval_<city>.json`
-- `data/reports/eval_routes_<city>.json`
+- `data/reports/eval_<city>_latest.json` (overwritten by benchmark; used by figure generator)
+- `data/reports/eval_routes_<city>_latest.json`
+- `data/reports/benchmarks/eval_<city>_<timestamp>.json` (immutable snapshots)
 - benchmark aggregate:
   - `data/reports/benchmarks/benchmark_3cities_summary.json`
   - `data/reports/benchmarks/benchmark_3cities_summary.md`
+
+Note: `scripts/generate_tfg_figures.py` reads `*_latest.json` files with priority. Run the benchmark before regenerating figures to ensure figures reflect the latest results.

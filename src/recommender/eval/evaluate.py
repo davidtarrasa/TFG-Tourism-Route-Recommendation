@@ -488,7 +488,7 @@ def eval_modes(
         user_group = "cold" if len(user_items) < 5 else "warm"
         content_scores = score_content(user_items, tfidf_ids, tfidf_matrix)
         co_scores = score_co_visitation(user_items, co_mat, id_to_idx, idx_to_id)
-        markov_scores = dict(next_poi_order2(prev_poi, str(current_poi), trans_poi2, trans_poi, topn=2000, backoff=0.3))
+        markov_scores = dict(next_poi_order2(prev_poi, str(current_poi), trans_poi2, trans_poi, topn=2000, backoff=float(markov_cfg.get("backoff", 0.3))))
         markov_scores = _apply_hub_penalty(markov_scores, item_counts=item_counts, alpha=float(markov_cfg.get("hub_alpha", 0.0)))
 
         embed_scores: Dict[str, float] = {}
