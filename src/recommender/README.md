@@ -34,7 +34,7 @@ Recommendation engines
 - `embed`: Word2Vec sequence neighbors
 - `als`: implicit collaborative filtering
 - `hybrid`: weighted combination of all available signals
-- `rrf`: Reciprocal Rank Fusion — combines scores from all 5 base engines using `1/(60 + rank_i)`; no manual weight tuning needed
+- `rrf`: Reciprocal Rank Fusion — combines scores from all 5 base engines using `1/(rrf_k + rank_i)`; `rrf_k` is configurable per city (default 30); no manual weight tuning needed
 - `popular`: popularity baseline — ranks candidates by raw visit frequency across all users
 - `random`: trivial random baseline (control)
 

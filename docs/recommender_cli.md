@@ -10,7 +10,7 @@
 | `embed` | vecinos Word2Vec sobre trails |
 | `als` | filtrado colaborativo implicito (ALS) |
 | `hybrid` | fusion ponderada de los 5 anteriores (pesos por escenario en config) |
-| `rrf` | Reciprocal Rank Fusion automatica: `1/(60+rank)` sobre los 5 motores |
+| `rrf` | Reciprocal Rank Fusion automática: `1/(rrf_k+rank)` sobre los 5 motores (rrf_k configurable por ciudad, defecto 30) |
 | `popular` | baseline de popularidad: ranking por frecuencia de visitas global |
 | `random` | control aleatorio (baseline de referencia) |
 
@@ -102,7 +102,7 @@ Salida consolidada:
 ## Generar figuras de tesis
 
 ```bash
-python scripts/generate_tfg_figures.py           # todas las figuras (20)
+python scripts/generate_tfg_figures.py           # todas las figuras (25)
 python scripts/generate_tfg_figures.py --only fig_12   # solo una
 python scripts/generate_tfg_figures.py --skip fig_03   # saltar una
 ```

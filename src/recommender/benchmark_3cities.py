@@ -342,6 +342,21 @@ def main() -> None:
     print(f"\nSaved: {out_json}")
     print(f"Saved: {out_md}")
 
+    # Sync _latest.json so figure generator always reads fresh benchmark data
+    reports_dir = os.path.join(os.path.dirname(bench_dir), "")
+    import shutil
+    for city in CITIES:
+        src_rank = os.path.join(bench_dir, f"eval_{city.slug}.json")
+        src_routes = os.path.join(bench_dir, f"eval_routes_{city.slug}.json")
+        dst_rank = os.path.join(reports_dir, f"eval_{city.qid}_latest.json")
+        dst_routes = os.path.join(reports_dir, f"eval_routes_{city.qid}_latest.json")
+        if os.path.exists(src_rank):
+            shutil.copy2(src_rank, dst_rank)
+            print(f"Synced: {dst_rank}")
+        if os.path.exists(src_routes):
+            shutil.copy2(src_routes, dst_routes)
+            print(f"Synced: {dst_routes}")
+
 
 if __name__ == "__main__":
     main()

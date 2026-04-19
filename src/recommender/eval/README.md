@@ -57,7 +57,7 @@ Reported metrics (per mode):
 Notes:
 
 - `random` is a trivial random baseline; `popular` ranks by visit frequency across all users.
-- `rrf` applies Reciprocal Rank Fusion (`1/(60+rank)`) over all 5 base engine rankings — no trained artifact needed.
+- `rrf` applies Reciprocal Rank Fusion (`1/(rrf_k+rank)`) over all 5 base engine rankings — no trained artifact needed. `rrf_k` defaults to 30 and is configurable per city via `[eval] rrf_k` in each `configs/recommender_<qid>.toml`.
 - All modes use the same fixed seed item and split for fair comparison.
 - `--fair` retrains models on train split only (leak-free, slower).
 - Without `--fair`, cached artifacts can be loaded (faster, but potential data leakage).
