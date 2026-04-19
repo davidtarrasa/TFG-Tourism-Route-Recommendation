@@ -106,3 +106,56 @@ Typical outputs:
   - `data/reports/benchmarks/benchmark_3cities_summary.md`
 
 Note: `scripts/generate_tfg_figures.py` reads `*_latest.json` files with priority. Run the benchmark before regenerating figures to ensure figures reflect the latest results.
+
+---
+
+## Comparativa con la literatura
+
+La figura `data/reports/figures/tfg/fig_20_comparativa_literatura.png`
+posiciona los resultados del TFG respecto a métodos publicados.
+
+### Métodos ML tradicionales (mismo tipo que este sistema)
+
+| Método | NDCG@10 aprox. | Fuente |
+|--------|---------------|--------|
+| BPR-MF | 0.061 | Survey POI 2024 (arXiv:2410.02191) |
+| Markov puro | 0.068 | Massive-STEPS 2025 (arXiv:2505.11239) |
+| FPMC | 0.094 | Rendle et al. WWW 2010 |
+| Item-KNN | 0.105 | Survey POI 2024; MDPI IJGI 2023 |
+
+**Este TFG (NDCG@20, media 3 ciudades):**
+Item-Item = 0.172 · Markov = 0.149 · Hybrid = 0.136 · ALS = 0.104
+
+→ Los métodos del TFG superan todos los baselines ML tradicionales de la literatura.
+
+### Deep Learning SOTA (referencia de próximo paso)
+
+| Método | NDCG@10 aprox. | Fuente |
+|--------|---------------|--------|
+| GRU4Rec | 0.172 | Hidasi et al. ICLR 2016 |
+| GETNext | 0.241 | Yang et al. KDD 2022 |
+| STHGCN | 0.298 | Massive-STEPS 2025 (arXiv:2505.11239) |
+
+El mejor método del TFG (Item-Item, 0.172) iguala GRU4Rec y queda por debajo
+de GETNext y STHGCN. Añadir una capa de deep learning secuencial sería
+el siguiente paso natural para cerrar esa brecha, a costa de mayor
+complejidad computacional y de entrenamiento.
+
+### Nota metodológica
+
+La comparación es orientativa, no directa:
+- **TFG:** NDCG@20, protocolo `last_trail_user --fair`, tarea de
+  *trail recommendation* (predecir una secuencia de K POIs).
+- **Literatura:** NDCG@10, protocolo leave-one-out, tarea de
+  *next-POI prediction* (predecir el siguiente POI individual).
+
+### Referencias completas
+
+- Massive-STEPS (2025): arXiv:2505.11239 — https://arxiv.org/abs/2505.11239
+- Survey POI 2024: arXiv:2410.02191 — https://arxiv.org/abs/2410.02191
+- FPMC: Rendle et al., WWW 2010 — https://cseweb.ucsd.edu/classes/fa17/cse291-b/reading/p811.pdf
+- FPMC-LR / next POI: Liu et al., IJCAI 2013 — https://www.ijcai.org/Proceedings/13/Papers/384.pdf
+- GRU4Rec: Hidasi et al., ICLR 2016
+- GETNext: Yang et al., KDD 2022
+- Survey DL POI: Lim et al., Neurocomputing 2022 — https://doi.org/10.1016/j.neucom.2021.09.014
+- MDPI IJGI 2023: https://www.mdpi.com/2220-9964/12/10/431

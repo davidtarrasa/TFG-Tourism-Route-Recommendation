@@ -638,7 +638,7 @@ def eval_modes(
                 def _ranks(scores: Dict[str, float]) -> Dict[str, int]:
                     return {fid: i for i, fid in enumerate(sorted(scores, key=scores.__getitem__, reverse=True))}
                 all_model_ranks = [_ranks(s) for s in [content_scores, co_scores, markov_scores, embed_scores, als_scores]]
-                rrf_k = 60
+                rrf_k = int(eval_cfg.get("rrf_k", 30))
                 all_rrf_ids = set(content_scores) | set(co_scores) | set(markov_scores) | set(embed_scores) | set(als_scores)
                 rec_scores = {
                     fid: sum(1.0 / (rrf_k + r.get(fid, len(r)) + 1) for r in all_model_ranks)

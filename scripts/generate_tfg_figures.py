@@ -227,6 +227,39 @@ def _safe_write_plotly_png(fig, out_png: Path):
         plt.close(fig_fallback)
 
 
+def _try_add_basemap(ax, ctx, source, zoom: int) -> bool:
+    providers = []
+    if source is not None:
+        providers.append(source)
+    fallback_names = [
+        ("OpenStreetMap", "Mapnik"),
+        ("OpenStreetMap", "HOT"),
+        ("Esri", "WorldImagery"),
+        ("Esri", "WorldStreetMap"),
+        ("CartoDB", "Positron"),
+    ]
+    for top, child in fallback_names:
+        try:
+            cand = getattr(getattr(ctx.providers, top), child)
+            if cand not in providers:
+                providers.append(cand)
+        except Exception:
+            continue
+
+    last_error = None
+    for prov in providers:
+        try:
+            ctx.add_basemap(ax, source=prov, zoom=zoom)
+            return True
+        except Exception as e:
+            last_error = e
+            continue
+
+    log(f"Basemap no disponible (se genera figura sin fondo web): {last_error}")
+    ax.set_facecolor("#F2F3F5")
+    return False
+
+
 def _save_sankey_fallback_png(
     labels: list[str],
     source: list[int],
@@ -475,7 +508,7 @@ def fig_02_pois_mapa_categorias():
         )
     ax.set_xlim(x0 - padx, x1 + padx)
     ax.set_ylim(y0 - pady, y1 + pady)
-    ctx.add_basemap(ax, source=ctx.providers.CartoDB.Positron, zoom=12)
+    _try_add_basemap(ax, ctx, ctx.providers.CartoDB.Positron, zoom=12)
     ax.set_axis_off()
     ax.set_title("Osaka (Q35765): POIs por categoría (agrupada) · tamaño = rating", fontsize=14, fontweight="bold")
     ax.legend(title="category_broad", bbox_to_anchor=(1.02, 1), loc="upper left", fontsize=9)
@@ -536,7 +569,7 @@ def fig_03_heatmap_checkins():
     ax.set_ylim(ymin, ymax)
 
     # 2. Ahora el basemap descarga tiles para Osaka (usa xlim/ylim actuales)
-    ctx.add_basemap(ax, source=ctx.providers.CartoDB.Positron, zoom=12)
+    _try_add_basemap(ax, ctx, ctx.providers.CartoDB.Positron, zoom=12)
 
     # 3. Superponer KDE con pcolormesh (usa las mismas coordenadas Mercator xx, yy)
     #    pcolormesh respeta el sistema de coordenadas del eje, a diferencia de imshow
@@ -583,7 +616,7 @@ def fig_04_hexbin_rating():
     hb.set_alpha(0.46)
     ax.set_xlim(x0 - padx, x1 + padx)
     ax.set_ylim(y0 - pady, y1 + pady)
-    ctx.add_basemap(ax, source=ctx.providers.CartoDB.Positron, zoom=12)
+    _try_add_basemap(ax, ctx, ctx.providers.CartoDB.Positron, zoom=12)
     cb = fig.colorbar(hb, ax=ax)
     cb.set_label("rating promedio")
     ax.set_axis_off()
@@ -624,7 +657,7 @@ def fig_05_tres_ciudades():
         ax.set_xlim(x0 - padx, x1 + padx)
         ax.set_ylim(y0 - pady, y1 + pady)
         ax.set_aspect("auto")
-        ctx.add_basemap(ax, source=ctx.providers.CartoDB.Positron, zoom=11)
+        _try_add_basemap(ax, ctx, ctx.providers.CartoDB.Positron, zoom=11)
         ax.set_title(CITY_META[city_qid]["name"], fontsize=12, fontweight="bold")
         ax.set_axis_off()
     fig.suptitle("Distribución de POIs por ciudad de estudio", fontsize=17, fontweight="bold")
@@ -912,92 +945,123 @@ def fig_11_hybrid_weights():
 
 
 def fig_12_tabla_metricas():
-    parts = []
+    METRICS   = ["hit", "precision", "recall", "ndcg", "novelty", "diversity"]
+    COL_HDR   = ["Hit@K", "Prec@K", "Recall@K", "nDCG@K", "Novelty", "Diversity"]
+    MODE_ORDER = ["rrf", "item", "markov", "popular", "hybrid", "als", "embed", "content", "random"]
+    HDR_BG, HDR_FG = "#37474F", "white"
+    MODE_BG        = "#E3F2FD"
+    ROW_BG         = ["#F5F5F5", "#FFFFFF"]
+    BEST_BG        = "#C8E6C9"
+    WORST_BG       = "#FFCDD2"
+
+    city_dfs: dict[str, pd.DataFrame] = {}
     for qid in CITY_META:
-        df = load_eval_results(qid)
-        keep = [
-            c
-            for c in [
-                "mode",
-                "hit",
-                "precision",
-                "recall",
-                "ndcg",
-                "novelty",
-                "diversity",
-                "cat_hit",
-                "cat_precision",
-                "cat_recall",
-                "cat_ndcg",
-            ]
-            if c in df.columns
-        ]
-        temp = df[keep].copy()
-        temp["city"] = CITY_META[qid]["name"]
-        parts.append(temp)
-    all_df = pd.concat(parts, ignore_index=True)
-    out_csv = _save("fig_12_tabla_metricas.csv")
-    all_df.to_csv(out_csv, index=False)
+        city_dfs[qid] = load_eval_results(qid)
 
-    pivot = all_df.pivot_table(index="mode", columns="city", values=["hit", "precision", "recall", "ndcg", "novelty", "diversity"])
-    pivot = pivot.sort_index(axis=1)
+    # Save full CSV
+    all_df = pd.concat(list(city_dfs.values()), ignore_index=True)
+    all_df.to_csv(_save("fig_12_tabla_metricas.csv"), index=False)
 
-    try:
-        import dataframe_image as dfi
+    fig, axes = plt.subplots(3, 1, figsize=(15, 22),
+                             gridspec_kw={"hspace": 0.18})
+    fig.patch.set_facecolor("#FAFAFA")
+    fig.suptitle(
+        "Métricas de evaluación offline — Hit / Precision / Recall / nDCG@20 · Novelty · Diversity\n"
+        "Protocolo: last_trail_user  ·  --fair  ·  k=20  ·  seed=42",
+        fontsize=13, fontweight="bold", y=1.01,
+    )
 
-        def _style_col(s: pd.Series):
-            out = []
-            valid = s[s.index.astype(str) != "random"]
-            max_v = valid.max() if not valid.empty else s.max()
-            min_v = valid.min() if not valid.empty else s.min()
-            for idx, v in zip(s.index, s.values):
-                if isinstance(idx, str) and idx.lower() == "random":
-                    out.append("")
-                elif v == max_v:
-                    out.append("background-color: #C8E6C9")
-                elif v == min_v:
-                    out.append("background-color: #FFCDD2")
+    for ax, qid in zip(axes, CITY_META):
+        df = city_dfs[qid]
+        city_name = CITY_META[qid]["name"]
+
+        # Ordered modes: prefer MODE_ORDER, append any extras, random always last
+        present = set(df["mode"].tolist())
+        ordered = [m for m in MODE_ORDER if m in present]
+        ordered += [m for m in present if m not in ordered and m != "random"]
+        if "random" in present and "random" not in ordered:
+            ordered.append("random")
+
+        # Build cell text matrix
+        cell_text = []
+        for mode in ordered:
+            row = df[df["mode"] == mode]
+            vals = []
+            for c in METRICS:
+                if row.empty or c not in row.columns:
+                    vals.append("—")
                 else:
-                    out.append("")
-            return out
+                    v = row.iloc[0][c]
+                    vals.append(f"{float(v):.3f}" if pd.notna(v) else "—")
+            cell_text.append([mode] + vals)
 
-        styled = pivot.style.format("{:.4f}").apply(_style_col, axis=0)
-        dfi.export(styled, str(_save("fig_12_tabla_metricas.png")))
-    except ImportError:
-        missing_dep("dataframe_image")
-        fig, ax = plt.subplots(figsize=(22, 5))
         ax.axis("off")
-        col_labels = [f"{str(c[0])}\n{str(c[1])}" if isinstance(c, tuple) else str(c) for c in pivot.columns]
+        ax.set_title(f"  {city_name}  ({qid})", fontsize=12, fontweight="bold",
+                     loc="left", pad=6, color="#1A1A2E")
+
         tab = ax.table(
-            cellText=np.round(pivot.values, 4),
-            rowLabels=pivot.index.tolist(),
-            colLabels=col_labels,
+            cellText=cell_text,
+            colLabels=["Motor"] + COL_HDR,
             loc="center",
+            cellLoc="center",
         )
-        row_names = [str(r) for r in pivot.index.tolist()]
-        for j in range(pivot.shape[1]):
-            col = pd.to_numeric(pivot.iloc[:, j], errors="coerce")
-            valid = col.copy()
-            if "random" in [x.lower() for x in row_names]:
-                keep_mask = [name.lower() != "random" for name in row_names]
-                valid = valid[keep_mask]
-            max_v = col.max(skipna=True)
-            min_v = valid.min(skipna=True) if len(valid) else col.min(skipna=True)
-            for i in range(pivot.shape[0]):
-                cell = tab[(i + 1, j)]
-                cell.set_facecolor("#FFFFFF")
-                v = col.iloc[i]
-                if pd.notna(v) and v == max_v:
-                    cell.set_facecolor("#C8E6C9")
-                elif pd.notna(v) and v == min_v and row_names[i].lower() != "random":
-                    cell.set_facecolor("#FFCDD2")
         tab.auto_set_font_size(False)
-        tab.set_fontsize(7)
-        tab.scale(1.2, 1.6)
-        ax.set_title("Tabla de métricas (CSV fallback por ausencia de dataframe_image)", fontsize=12)
-        ax.text(0, -0.05, "Verde=mejor engine por columna · Rosa=peor", transform=ax.transAxes, fontsize=9)
-        fig.savefig(_save("fig_12_tabla_metricas.png"), dpi=300, bbox_inches="tight")
-        plt.close(fig)
+        tab.set_fontsize(10)
+        tab.scale(1.05, 2.45)
+
+        n_rows = len(ordered)
+        n_cols = 1 + len(METRICS)
+
+        # Header row style
+        for j in range(n_cols):
+            cell = tab[(0, j)]
+            cell.set_facecolor(HDR_BG)
+            cell.set_text_props(color=HDR_FG, fontweight="bold")
+
+        # Alternating row + mode-column style
+        for ri, mode in enumerate(ordered):
+            bg = ROW_BG[ri % 2]
+            for j in range(n_cols):
+                cell = tab[(ri + 1, j)]
+                if j == 0:
+                    cell.set_facecolor(MODE_BG)
+                    cell.set_text_props(fontweight="bold")
+                else:
+                    cell.set_facecolor(bg)
+
+        # Best / worst highlight per metric column
+        for col_j, col_name in enumerate(METRICS, start=1):
+            num_vals: list[tuple[int, float]] = []
+            for ri, mode in enumerate(ordered):
+                row = df[df["mode"] == mode]
+                if not row.empty and col_name in row.columns:
+                    v = row.iloc[0][col_name]
+                    try:
+                        num_vals.append((ri, float(v)))
+                    except (TypeError, ValueError):
+                        pass
+
+            non_rnd = [(ri, v) for ri, v in num_vals if ordered[ri] != "random"]
+            valid_v = [v for _, v in non_rnd if pd.notna(v)]
+            if not valid_v:
+                continue
+            max_v, min_v = max(valid_v), min(valid_v)
+
+            for ri, v in num_vals:
+                if pd.isna(v):
+                    continue
+                cell = tab[(ri + 1, col_j)]
+                if v == max_v:
+                    cell.set_facecolor(BEST_BG)
+                elif v == min_v and ordered[ri] != "random":
+                    cell.set_facecolor(WORST_BG)
+
+    fig.text(0.5, -0.005,
+             "Verde = mejor motor por columna (excl. random)  ·  Rojo = peor motor por columna",
+             ha="center", fontsize=9, color="#555", style="italic")
+    fig.savefig(_save("fig_12_tabla_metricas.png"), dpi=220, bbox_inches="tight",
+                facecolor=fig.get_facecolor())
+    plt.close(fig)
 
 
 def fig_13_barras_agrupadas():
@@ -1530,6 +1594,319 @@ def fig_20_eval_protocolo():
     plt.close(fig)
 
 
+def fig_20_comparativa_literatura():
+    """Comparativa NDCG del TFG vs métodos ML tradicionales y DL SOTA."""
+    import matplotlib.patches as mpatches
+
+    # TFG — NDCG@20 promedio 3 ciudades leído de _latest.json
+    # Protocolo: last_trail_user --fair, Foursquare Semantic Trails 2018
+    _TFG_META = [
+        ("content", "Content (TFG)",   "#bdbdbd"),
+        ("embed",   "Embed (TFG)",     "#90caf9"),
+        ("rrf",     "RRF (TFG)",       "#a5d6a7"),
+        ("als",     "ALS (TFG)",       "#80cbc4"),
+        ("hybrid",  "Hybrid (TFG)",    "#ce93d8"),
+        ("markov",  "Markov (TFG)",    "#ffb74d"),
+        ("item",    "Item-Item (TFG)", "#ef9a9a"),
+    ]
+    ndcg_per_mode: dict[str, list[float]] = {}
+    for qid in CITY_META:
+        df = load_eval_results(qid)
+        for _, row in df.iterrows():
+            mode = str(row.get("mode", ""))
+            v = row.get("ndcg", np.nan)
+            if pd.notna(v):
+                ndcg_per_mode.setdefault(mode, []).append(float(v))
+    tfg = []
+    for key, label, color in _TFG_META:
+        vals = ndcg_per_mode.get(key, [])
+        avg = round(sum(vals) / len(vals), 3) if vals else 0.0
+        tfg.append((label, avg, color))
+    tfg.sort(key=lambda x: x[1])  # ascending for barh
+
+    # Literatura ML tradicional — NDCG@10 aprox.
+    # Fuentes: Survey POI arXiv:2410.02191, Massive-STEPS arXiv:2505.11239,
+    #          FPMC WWW2010, IJCAI2013, MDPI IJGI 2023
+    lit_ml = [
+        ("BPR-MF\n(lit.)",     0.061, "#9e9e9e"),
+        ("Markov\n(lit.)",     0.068, "#9e9e9e"),
+        ("FPMC\n(lit.)",       0.094, "#9e9e9e"),
+        ("Item-KNN\n(lit.)",   0.105, "#9e9e9e"),
+    ]
+
+    # Deep Learning SOTA — NDCG@10 aprox. — referencia de próximo paso
+    # Fuentes: GRU4Rec ICLR2016, GETNext KDD2022, STHGCN Massive-STEPS 2025
+    lit_dl = [
+        ("GRU4Rec",       0.172, "#1e88e5"),
+        ("GETNext",       0.241, "#1565c0"),
+        ("STHGCN (SOTA)", 0.298, "#0d47a1"),
+    ]
+
+    fig, (ax1, ax2) = plt.subplots(
+        1, 2, figsize=(16, 7),
+        gridspec_kw={"width_ratios": [2.2, 1], "wspace": 0.08}
+    )
+    fig.patch.set_facecolor("#fafafa")
+
+    # ── Panel izquierdo ──────────────────────────────────────────────
+    ax1.set_facecolor("#f5f5f5")
+    ax1.set_title("Métodos ML tradicionales  vs.  este TFG",
+                  fontsize=13, fontweight="bold", pad=14)
+
+    # Barras ML tradicional
+    y_ml = list(range(len(lit_ml)))
+    for i, (label, val, col) in enumerate(lit_ml):
+        ax1.barh(i, val, height=0.55, color=col, edgecolor="white", linewidth=0.8)
+        ax1.text(val + 0.004, i, f"{val:.3f}", va="center", fontsize=9, color="#555")
+
+    # Gap y separador
+    gap_y = len(lit_ml) + 0.9
+    ax1.text(0.175, gap_y - 0.45, "── este TFG ──",
+             ha="center", va="center", fontsize=8, color="#999")
+
+    # Rectángulo de fondo suave para zona TFG
+    n_tfg = len(tfg)
+    rect = plt.Rectangle(
+        (0, gap_y), 0.35, n_tfg + 0.2,
+        color="#ff9800", alpha=0.06, zorder=0
+    )
+    ax1.add_patch(rect)
+
+    # Barras TFG
+    y_tfg = [gap_y + i for i in range(n_tfg)]
+    for i, (label, val, col) in enumerate(tfg):
+        ax1.barh(y_tfg[i], val, height=0.55, color=col,
+                 edgecolor="white", linewidth=0.8)
+        ax1.text(val + 0.004, y_tfg[i], f"{val:.3f}",
+                 va="center", fontsize=9, color="#333", fontweight="bold")
+
+    # Línea vertical = mejor baseline tradicional
+    best_lit = max(v for _, v, _ in lit_ml)
+    ax1.axvline(best_lit, color="#757575", linestyle="--",
+                linewidth=1.2, alpha=0.7, zorder=3)
+    ax1.text(best_lit + 0.003, gap_y + n_tfg - 0.2,
+             f"mejor tradicional\n(literatura)\n{best_lit:.3f}",
+             fontsize=7.5, color="#757575", va="top")
+
+    # Ejes y formato
+    all_labels = [l for l, _, _ in lit_ml] + [l for l, _, _ in tfg]
+    all_y      = y_ml + y_tfg
+    ax1.set_yticks(all_y)
+    ax1.set_yticklabels(all_labels, fontsize=9.5)
+    x_max = max(max(v for _, v, _ in tfg), max(v for _, v, _ in lit_ml)) * 1.25
+    ax1.set_xlim(0, x_max)
+    ax1.set_xlabel("NDCG@K", fontsize=11)
+    ax1.xaxis.grid(True, alpha=0.4, color="white")
+    ax1.spines[["top", "right"]].set_visible(False)
+
+    p1 = mpatches.Patch(color="#9e9e9e", label="ML tradicional (literatura, NDCG@10)")
+    p2 = mpatches.Patch(color="#ff9800", alpha=0.6,
+                        label="Este TFG (NDCG@20, media 3 ciudades)")
+    ax1.legend(handles=[p1, p2], loc="lower right", fontsize=8.5, framealpha=0.9)
+
+    # ── Panel derecho ────────────────────────────────────────────────
+    ax2.set_facecolor("#e3f2fd")
+    ax2.set_title("Deep Learning\n→ Próximo paso",
+                  fontsize=13, fontweight="bold", color="#0d47a1", pad=14)
+
+    for i, (label, val, col) in enumerate(lit_dl):
+        ax2.barh(i, val, height=0.55, color=col, edgecolor="white", linewidth=0.8)
+        ax2.text(val + 0.004, i, f"{val:.3f}",
+                 va="center", fontsize=9, color="#0d47a1", fontweight="bold")
+
+    # Línea roja = mejor resultado TFG (motor con mayor NDCG@20)
+    best_entry = max(tfg, key=lambda x: x[1])
+    best_tfg_label = best_entry[0].replace(" (TFG)", "")
+    best_tfg = best_entry[1]
+    ax2.axvline(best_tfg, color="#ef5350", linestyle=":",
+                linewidth=1.8, alpha=0.85, zorder=3)
+    ax2.text(best_tfg - 0.003, len(lit_dl) - 0.2,
+             f"{best_tfg_label}\n(TFG)\n{best_tfg:.3f}",
+             fontsize=7.5, color="#ef5350", va="top", ha="right")
+
+    ax2.set_yticks(range(len(lit_dl)))
+    ax2.set_yticklabels([l for l, _, _ in lit_dl], fontsize=9.5)
+    ax2.set_xlim(0, max(v for _, v, _ in lit_dl) * 1.2)
+    ax2.set_xlabel("NDCG@K", fontsize=11)
+    ax2.xaxis.grid(True, alpha=0.3, color="white")
+    ax2.spines[["top", "right"]].set_visible(False)
+    ax2.text(0.175, -0.85,
+             "Requiere redes neuronales\nprofundas y más cómputo",
+             ha="center", fontsize=8.5, color="#1565c0", style="italic")
+
+    # ── Títulos y nota ────────────────────────────────────────────────
+    fig.suptitle(
+        "Posicionamiento del sistema de recomendación turística\n"
+        "respecto al estado del arte",
+        fontsize=15, fontweight="bold", y=1.02
+    )
+    fig.text(
+        0.5, -0.05,
+        "⚠  Comparación orientativa: TFG usa NDCG@20 + protocolo last_trail_user "
+        "(trail recommendation)  ·  Literatura usa NDCG@10 + leave-one-out (next-POI prediction)\n"
+        "Fuentes: Massive-STEPS 2025 (arXiv:2505.11239)  ·  Survey POI 2024 (arXiv:2410.02191)  "
+        "·  FPMC WWW2010  ·  GETNext KDD2022",
+        ha="center", fontsize=7.5, color="#757575", style="italic"
+    )
+
+    fig.savefig(
+        _save("fig_20_comparativa_literatura.png"),
+        dpi=300, bbox_inches="tight", facecolor=fig.get_facecolor()
+    )
+    plt.close(fig)
+    log("fig_20_comparativa_literatura — OK")
+
+
+def fig_22_comparativa_hit():
+    """Comparativa Hit@K del TFG vs métodos ML tradicionales y DL SOTA."""
+    import matplotlib.patches as mpatches
+
+    _TFG_META = [
+        ("content", "Content (TFG)",   "#bdbdbd"),
+        ("embed",   "Embed (TFG)",     "#90caf9"),
+        ("als",     "ALS (TFG)",       "#80cbc4"),
+        ("hybrid",  "Hybrid (TFG)",    "#ce93d8"),
+        ("item",    "Item-Item (TFG)", "#ef9a9a"),
+        ("markov",  "Markov (TFG)",    "#ffb74d"),
+        ("rrf",     "RRF (TFG)",       "#a5d6a7"),
+    ]
+
+    hit_per_mode: dict[str, list[float]] = {}
+    for qid in CITY_META:
+        df = load_eval_results(qid)
+        for _, row in df.iterrows():
+            mode = str(row.get("mode", ""))
+            v = row.get("hit", np.nan)
+            if pd.notna(v):
+                hit_per_mode.setdefault(mode, []).append(float(v))
+
+    tfg = []
+    for key, label, color in _TFG_META:
+        vals = hit_per_mode.get(key, [])
+        avg = round(sum(vals) / len(vals), 3) if vals else 0.0
+        tfg.append((label, avg, color))
+    tfg.sort(key=lambda x: x[1])
+
+    lit_ml = [
+        ("MF",   0.152, "#9e9e9e"),
+        ("FPMC", 0.297, "#9e9e9e"),
+        ("PRME", 0.311, "#9e9e9e"),
+    ]
+    lit_dl = [
+        ("LSTM",    0.328, "#90caf9"),
+        ("ST-RNN",  0.362, "#64b5f6"),
+        ("STGN",    0.412, "#42a5f5"),
+        ("STGCN",   0.428, "#1e88e5"),
+        ("PLSPL",   0.452, "#1565c0"),
+        ("STAN",    0.573, "#0d47a1"),
+        ("GETNext", 0.614, "#002171"),
+    ]
+
+    fig, (ax1, ax2) = plt.subplots(
+        1, 2, figsize=(16, 9),
+        gridspec_kw={"width_ratios": [2.2, 1], "wspace": 0.08}
+    )
+    fig.patch.set_facecolor("#fafafa")
+
+    # ── Panel izquierdo ──────────────────────────────────────────────
+    ax1.set_facecolor("#f5f5f5")
+    ax1.set_title("Métodos ML tradicionales  vs.  este TFG",
+                  fontsize=13, fontweight="bold", pad=14)
+
+    y_ml = list(range(len(lit_ml)))
+    for i, (label, val, col) in enumerate(lit_ml):
+        ax1.barh(i, val, height=0.55, color=col, edgecolor="white", linewidth=0.8)
+        ax1.text(val + 0.006, i, f"{val:.3f}", va="center", fontsize=9, color="#555")
+
+    gap_y = len(lit_ml) + 0.9
+    ax1.text(0.25, gap_y - 0.45, "── este TFG ──",
+             ha="center", va="center", fontsize=8, color="#999")
+
+    n_tfg = len(tfg)
+    ax1.add_patch(plt.Rectangle(
+        (0, gap_y), 0.55, n_tfg + 0.2, color="#ff9800", alpha=0.06, zorder=0
+    ))
+
+    y_tfg = [gap_y + i for i in range(n_tfg)]
+    for i, (label, val, col) in enumerate(tfg):
+        ax1.barh(y_tfg[i], val, height=0.55, color=col,
+                 edgecolor="white", linewidth=0.8)
+        ax1.text(val + 0.006, y_tfg[i], f"{val:.3f}",
+                 va="center", fontsize=9, color="#333", fontweight="bold")
+
+    best_lit = max(v for _, v, _ in lit_ml)
+    ax1.axvline(best_lit, color="#757575", linestyle="--",
+                linewidth=1.2, alpha=0.7, zorder=3)
+    ax1.text(best_lit + 0.006, gap_y + n_tfg - 0.2,
+             f"mejor tradicional\n(literatura)\n{best_lit:.3f}",
+             fontsize=7.5, color="#757575", va="top")
+
+    all_labels = [l for l, _, _ in lit_ml] + [l for l, _, _ in tfg]
+    all_y = y_ml + y_tfg
+    ax1.set_yticks(all_y)
+    ax1.set_yticklabels(all_labels, fontsize=9.5)
+    x_max1 = max(max(v for _, v, _ in tfg), best_lit) * 1.3
+    ax1.set_xlim(0, x_max1)
+    ax1.set_xlabel("Hit@K", fontsize=11)
+    ax1.xaxis.grid(True, alpha=0.4, color="white")
+    ax1.spines[["top", "right"]].set_visible(False)
+
+    p1 = mpatches.Patch(color="#9e9e9e", label="ML tradicional (literatura, Hit@10)")
+    p2 = mpatches.Patch(color="#ff9800", alpha=0.6,
+                        label="Este TFG (Hit@20, media 3 ciudades)")
+    ax1.legend(handles=[p1, p2], loc="lower right", fontsize=8.5, framealpha=0.9)
+
+    # ── Panel derecho ────────────────────────────────────────────────
+    ax2.set_facecolor("#e3f2fd")
+    ax2.set_title("Deep Learning\n→ Próximo paso",
+                  fontsize=13, fontweight="bold", color="#0d47a1", pad=14)
+
+    for i, (label, val, col) in enumerate(lit_dl):
+        ax2.barh(i, val, height=0.55, color=col, edgecolor="white", linewidth=0.8)
+        ax2.text(val + 0.008, i, f"{val:.3f}",
+                 va="center", fontsize=9, color="#0d47a1", fontweight="bold")
+
+    best_entry = max(tfg, key=lambda x: x[1])
+    best_tfg_label = best_entry[0].replace(" (TFG)", "")
+    best_tfg = best_entry[1]
+    ax2.axvline(best_tfg, color="#ef5350", linestyle=":",
+                linewidth=1.8, alpha=0.85, zorder=3)
+    ax2.text(best_tfg - 0.008, len(lit_dl) - 0.2,
+             f"{best_tfg_label}\n(TFG)\n{best_tfg:.3f}",
+             fontsize=7.5, color="#ef5350", va="top", ha="right")
+
+    ax2.set_yticks(range(len(lit_dl)))
+    ax2.set_yticklabels([l for l, _, _ in lit_dl], fontsize=9.5)
+    ax2.set_xlim(0, max(v for _, v, _ in lit_dl) * 1.15)
+    ax2.set_xlabel("Hit@K", fontsize=11)
+    ax2.xaxis.grid(True, alpha=0.3, color="white")
+    ax2.spines[["top", "right"]].set_visible(False)
+    ax2.text(0.35, -1.0,
+             "Requiere redes neuronales\nprofundas y más cómputo",
+             ha="center", fontsize=8.5, color="#1565c0", style="italic")
+
+    fig.suptitle(
+        "Posicionamiento del sistema de recomendación turística\n"
+        "respecto al estado del arte  (Hit@K)",
+        fontsize=15, fontweight="bold", y=1.02
+    )
+    fig.text(
+        0.5, -0.04,
+        "⚠  Comparación orientativa: TFG usa Hit@20 + protocolo last_trail_user "
+        "(trail recommendation)  ·  Literatura usa Hit@10 + leave-one-out (next-POI prediction)\n"
+        "Fuentes: Massive-STEPS 2025 (arXiv:2505.11239)  ·  Survey POI 2024 (arXiv:2410.02191)  "
+        "·  FPMC WWW2010  ·  GETNext KDD2022  ·  STAN WWW2021",
+        ha="center", fontsize=7.5, color="#757575", style="italic"
+    )
+
+    fig.savefig(
+        _save("fig_22_comparativa_hit.png"),
+        dpi=300, bbox_inches="tight", facecolor=fig.get_facecolor()
+    )
+    plt.close(fig)
+    log("fig_22_comparativa_hit — OK")
+
+
 def _figure_registry() -> dict[str, Callable[[], None]]:
     return {
         "fig_01": fig_01_pipeline_sistema,
@@ -1553,6 +1930,8 @@ def _figure_registry() -> dict[str, Callable[[], None]]:
         "fig_19": fig_19_longitud_trails,
         "fig_14b": fig_14b_heatmap_metricas,
         "fig_20": fig_20_eval_protocolo,
+        "fig_21": fig_20_comparativa_literatura,
+        "fig_22": fig_22_comparativa_hit,
     }
 
 

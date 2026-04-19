@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(py -3 scripts/generate_tfg_figures.py --only fig_12)",
+      "Bash(py -3 scripts/generate_tfg_figures.py --only fig_13)",
+      "Bash(py -3 scripts/generate_tfg_figures.py --only fig_14)",
+      "Bash(py -3 scripts/generate_tfg_figures.py --only fig_14b)",
+      "Bash(py -3 scripts/generate_tfg_figures.py --only fig_15)",
+      "Bash(py -3 scripts/generate_tfg_figures.py --only fig_20)",
+      "Bash(py -3 scripts/generate_tfg_figures.py --only fig_21)",
+      "Bash(py -3 scripts/generate_tfg_figures.py --only fig_22)"
+    ]
+  }
+}
