@@ -19,6 +19,13 @@ Suggested naming:
 - `recommender_baseline_YYYY-MM-DD.toml`
 - `recommender_q35765_tuned_YYYY-MM-DD.toml`
 
-Current snapshot example:
+Active configs (auto-loaded por ciudad):
 
-- `recommender_baseline_2026-02-07.toml`
+- `configs/recommender.toml` — global fallback
+- `configs/recommender_q35765.toml` — Osaka: als.factors=128, markov.backoff=0.3, trail_current optimizado
+- `configs/recommender_q406.toml` — Istanbul: als.factors=128, markov.backoff=0.25, context_n=1
+- `configs/recommender_q864965.toml` — Petaling Jaya: als.factors=64, markov.backoff=0.25, context_n=3
+
+Snapshot de referencia:
+
+- `recommender_baseline_2026-02-07.toml` — estado previo al tuning sistematico

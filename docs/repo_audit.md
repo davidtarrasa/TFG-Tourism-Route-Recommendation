@@ -1,133 +1,145 @@
 # Auditoria Tecnica del Repositorio (TFG - Tourism Route Recommendation)
 
-Fecha: 2026-02-07
+Ultima actualizacion: 2026-04-18
 
-Este documento resume el estado real del repositorio, que partes estan "hechas" vs "en progreso", y los principales riesgos/incoherencias con respecto al objetivo del TFG (recomendacion + generacion/visualizacion de rutas).
+Este documento resume el estado real del repositorio tras el desarrollo completo del TFG.
 
+---
 
-## 1) Estado actual (lo que YA funciona end-to-end)
+## 1) Estado actual — implementado y operativo end-to-end
 
 ### Datos / ETL / BD
-- Pipeline ETL implementado (`src/etl/01_...08_*.py`) que produce datos procesados y los carga en Postgres.
-- Esquema SQL en `sql/schema.sql` con tablas:
-  - `visits` (check-ins / secuencias)
-  - `pois` (POIs enriquecidos)
-  - `poi_categories` (categorias secundarias)
-- Se ha normalizado el filtro por ciudad via `city_qid` (Wikidata) para evitar ambiguedades de nombres:
-  - `pois.city_qid` existe e indexado (relevante para performance y consistencia).
 
-### Recomendador CLI
-- CLI operativa (`src/recommender/cli.py`) que:
-  - consulta Postgres,
-  - genera candidatos por modelo (content/item/markov/embed/als),
-  - combina (hybrid),
-  - aplica reranking por distancia/prefs,
-  - puede planificar/ordenar itinerario y exportar HTML/GeoJSON.
+- Pipeline ETL completo (`src/etl/01_...08_*.py`): limpieza, enriquecimiento y carga en PostgreSQL.
+- Esquema SQL (`sql/schema.sql`) con tablas `visits`, `pois`, `poi_categories`, `saved_routes`.
+- Filtro por ciudad via `city_qid` (Wikidata QID) indexado.
+- 3 ciudades operativas: Osaka (Q35765), Istanbul (Q406), Petaling Jaya (Q864965).
+- ~200 000 check-ins reales (Foursquare Semantic Trails 2018).
 
-### Visualizacion de rutas
-- Generacion de mapas HTML (Folium) y GeoJSON a partir de la lista ordenada de POIs:
-  - `src/recommender/route_builder.py`
-  - `src/recommender/route_planner.py`
-- Mapa por defecto en modo satelite (Esri World Imagery) con selector de capas.
+### Motores de recomendacion (9 modos)
+
+| Modo | Tipo | Artefacto |
+|------|------|-----------|
+| `content` | TF-IDF sobre categorias POI | no |
+| `item` | co-visitacion (item-item) | no |
+| `markov` | transiciones secuenciales orden 1/2 | no |
+| `embed` | Word2Vec sobre trails | `.joblib` por ciudad |
+| `als` | ALS implicito (factorizacion) | `.joblib` por ciudad |
+| `hybrid` | fusion ponderada de los 5 anteriores | config TOML |
+| `rrf` | Reciprocal Rank Fusion automatica (k=60) | no |
+| `popular` | baseline por frecuencia de visitas | no |
+| `random` | control aleatorio | no |
+
+### Scoring y ruta
+
+- `scorer.py`: normaliza, fusiona y aplica reranking (distancia, precio, diversidad, prefs).
+- `route_planner.py`: seleccion greedy con restricciones de tramos.
+- `route_builder.py`: ordenacion NN + 2-opt, GeoJSON, Folium HTML.
+- Overlay de calles via OSRM (frontend) y Geoapify (si clave presente).
 
 ### Evaluacion offline
-Hay dos familias de evaluacion:
-- "Next-POI" (tipo recomendador secuencial): `src/recommender/eval/evaluate.py`
-  - protocolo `trail` (recomendado para Markov/embeddings),
-  - protocolo `user` (hold-out por usuario).
-- "Calidad de ruta" (coherencia espacial + diversidad): `src/recommender/eval/evaluate_routes.py`
-  - mide distancia total, distancia media entre tramos, % tramos demasiado cerca/lejos, diversidad de categorias, etc.
 
+- Protocolo principal: `last_trail_user` con `--fair` (reentrenamiento sobre split de train).
+- Split cold/warm: < 5 visitas TRAIN = cold, >= 5 = warm.
+- Metricas: Hit@K, Precision@K, Recall@K, nDCG@K + variantes por categoria + Novelty + Diversity.
+- Benchmark automatizado 3 ciudades: `benchmark_3cities.py`.
+- Figuras de tesis generadas con `scripts/generate_tfg_figures.py` (20 figuras).
 
-## 2) Configuracion (single source of truth)
+### Multi-ruta y API
 
-- `configs/recommender.toml` es el punto central para:
-  - hiperparametros de entrenamiento (embeddings/ALS),
-  - pesos del hibrido,
-  - constraints de planificacion/route-quality,
-  - parametros de evaluacion rapida (`[eval]` / `[eval_routes]`).
+- `multi_route_service.py`: genera 4 variantes (`history`, `inputs`, `location`, `full`) en una sola peticion.
+- FastAPI con endpoints `/recommend`, `/multi-recommend`, `/saved-routes`.
+- Persistencia de rutas en PostgreSQL (`saved_routes`) con fallback a localStorage en frontend.
 
-Riesgo a vigilar:
-- `src/recommender/scorer.py` cachea el config globalmente (variable `_CFG`).
-  - Si cambias el TOML y re-ejecutas en el mismo proceso (poco comun en CLI), no se recargara.
-  - En CLI normal (nuevo proceso), no hay problema.
+### Frontend
 
+- SPA HTML/CSS/JS vanilla: selector de ciudad, slider de paradas, preferencias, mapa Leaflet.
+- Variantes de ruta con tabs, leyenda por tramo, fullscreen, exportar JSON, guardar.
 
-## 3) Lo que esta en progreso / por hacer (segun planing)
+---
 
-### 3.1 Producto y "request contract"
-Actualmente la recomendacion se hace con un unico "modo" por ejecucion de CLI.
-Pendiente (solo documentado en `src/recommender/README.md`):
-- multi-ruta por request: `history`, `inputs`, `location`, `full` con reglas claras sobre senales presentes/ausentes.
+## 2) Configuracion
 
-### 3.2 Persistencia de usuarios / perfiles
-- No hay tabla de "usuarios" ni historico de "rutas generadas" (por decision).
-- Si se quisiera autentificacion/registro mas adelante, faltaria:
-  - esquema adicional (users, feedback, etc.)
-  - capa API/backend (opcional).
+- Config global: `configs/recommender.toml`.
+- Override por ciudad: `configs/recommender_<city_qid>.toml` (Osaka, Istanbul, Petaling Jaya).
+- Carga centralizada en `src/recommender/config.py`.
+- Contiene: pesos hibrido, hiperparametros Word2Vec/ALS, constraints de ruta, seeds de evaluacion.
 
-### 3.3 Modelos mas avanzados (SOTA)
-Los modelos actuales son baselines fuertes para TFG:
-- Markov orden 2 con backoff
-- Word2Vec (secuencial)
-- ALS implicito
-Pendiente (opcional):
-- modelos secuenciales neuronales (GRU4Rec/SASRec) o modelos contextuales mas complejos,
-- ajuste sistematico de pesos (tuning) y logging de experimentos.
+Nota: `scorer.py` cachea el config en `_CFG`. En uso CLI normal (proceso nuevo por ejecucion) no hay problema. No reusar el mismo proceso tras cambiar el TOML.
 
+---
 
-## 4) Incoherencias / riesgos detectados (y por que importan)
+## 3) Resultados de evaluacion (Hit@10, protocolo last_trail_user --fair)
 
-### (A) Evaluacion vs objetivo "turistico"
-- El dataset de `visits` contiene mucha movilidad cotidiana (transporte, plataformas, estaciones).
-- Esto puede hacer que:
-  - modelos secuenciales/ALS puntuen alto en next-POI,
-  - pero las rutas "parezcan poco turisticas" visualmente.
-Accion (opcional, cuando se quiera): filtros/penalizaciones "turisticas" por categoria o regex.
+| Motor | Osaka | Istanbul | Petaling Jaya |
+|-------|-------|----------|---------------|
+| rrf | **0.479** | 0.251 | **0.439** |
+| markov | 0.431 | **0.294** | 0.361 |
+| popular | 0.399 | 0.255 | 0.417 |
+| item | 0.399 | 0.264 | 0.405 |
+| hybrid | 0.406 | 0.165 | 0.358 |
+| als | 0.344 | 0.118 | 0.273 |
+| embed | 0.295 | 0.008 | 0.199 |
+| content | 0.149 | 0.024 | 0.114 |
+| random | 0.000 | 0.012 | 0.000 |
 
-### (B) Metricas optimistas si hay leakage
-- Para ser "fair", cualquier feature entrenada debe usar solo TRAIN.
-- La base del codigo respeta esto (transiciones/cooc/ALS se entrenan con TRAIN en evaluacion).
-Riesgo: si se reusa un artefacto entrenado con todos los datos, se podria inflar resultados.
-Recomendacion: versionar outputs en `data/reports/` y guardar siempre config + seed + limites.
+Detalle completo: `data/reports/figures/tfg/fig_12_tabla_metricas.csv`.
 
-### (C) Rendimiento / warnings de pandas
-- `pandas.read_sql` con conexiones DBAPI puede dar warnings (sugiere SQLAlchemy).
-- No rompe el sistema, pero ensucia salida y puede confundir en demo.
-Recomendacion: migrar a SQLAlchemy cuando toque "pulir".
+---
+
+## 4) Riesgos conocidos y estado actual
+
+### (A) Contenido "no turistico" en datos
+
+Foursquare incluye movilidad cotidiana (transporte, plataformas, oficinas). Los filtros por
+categoria (`exclude_categories` en config) excluyen los mas ruidosos. No se han implementado
+penalizaciones extra por categoria; se considera aceptable para TFG con datos reales.
+
+### (B) Leakage en evaluacion
+
+Resuelto con `--fair`: reentrenamiento de Word2Vec y ALS sobre el split de TRAIN de cada usuario.
+Content, item y Markov se construyen directamente sobre TRAIN. No hay filtracion de datos de test.
+
+### (C) Warnings de pandas / psycopg
+
+`pandas.read_sql` con psycopg3 puede emitir warnings sobre tipo de conector. No afecta resultados.
+Se puede migrar a SQLAlchemy si se quiere eliminar el ruido en produccion.
 
 ### (D) Ordenacion de ruta y cruces
-- Aun con NN+2-opt, pueden aparecer cruces dependiendo del set de POIs.
-- Si se necesita mas robustez:
-  - aumentar pool y usar 2-opt "mejor mejora" o un TSP heuristic mas fuerte,
-  - o usar OSRM/Geoapify para "route geometry" real (carreteras) y minimizar cruces en grafos reales.
 
+NN + 2-opt reduce cruces pero no garantiza solucion optima. Para rutas de <= 12 POIs es
+suficientemente robusto. El overlay OSRM en el frontend muestra geometria real de calles.
 
-## 5) Recomendacion de siguientes pasos (prioridad)
+### (E) Istanbul embeddings
 
-1) **Tuning rapido reproducible** (una ciudad):
-   - fijar protocolo de evaluacion (p.ej. `trail`, `--fair`),
-   - optimizar `hybrid.trail_current` y route_planner constraints,
-   - guardar resultados y config en `data/reports/`.
+En evaluacion fair con datos escasos, muchos POIs de Istanbul quedan fuera del vocabulario
+Word2Vec. El OOV backoff (recae en historial del usuario) mejora Hit@10 de 0.000 a 0.008.
+Se considera aceptable para TFG dado el tamano del dataset de Istanbul.
 
-2) **Benchmark interno estable**:
-   - un comando que ejecute `evaluate` + `evaluate_routes` para todos los modos,
-   - con los mismos limites (visits_limit/max_users/max_cases/seed) y exporte JSON.
+---
 
-3) **Documentacion final del sistema**:
-   - consolidar `docs/recommender_cli.md` y `src/recommender/README.md` con:
-     - como entrenar,
-     - como evaluar,
-     - como generar mapas,
-     - interpretacion de metricas (que significa "buena ruta").
+## 5) Tareas completadas (respecto a la auditoria inicial de 2026-02-07)
 
+- [x] Multi-ruta por request (`history`/`inputs`/`location`/`full`) implementado y operativo.
+- [x] Persistencia de rutas (`saved_routes` en PostgreSQL + localStorage frontend).
+- [x] Benchmark automatizado 3 ciudades con export JSON + Markdown.
+- [x] Protocolo de evaluacion justo (`--fair`, `last_trail_user`, cold/warm split).
+- [x] Tuning de hiperparametros por ciudad (backoff Markov, pesos hybrid, ALS factors).
+- [x] Motores adicionales: RRF (Reciprocal Rank Fusion) y Popular (baseline).
+- [x] Figuras de tesis generadas (20 figuras matplotlib + 3 diagramas mermaid PNG).
+- [x] Documentacion consolidada (READMEs por modulo, dossier completo, CLI guide).
+
+---
 
 ## 6) Referencias de archivos clave
-- Config: `configs/recommender.toml`
-- CLI: `src/recommender/cli.py`
-- Orquestador: `src/recommender/scorer.py`
-- BD: `src/recommender/utils_db.py`, `sql/schema.sql`, `src/etl/08_load_postgres.py`
-- Ordenacion/Mapa: `src/recommender/route_builder.py`, `src/recommender/route_planner.py`
-- Evaluacion: `src/recommender/eval/evaluate.py`, `src/recommender/eval/evaluate_routes.py`, `src/recommender/eval/route_metrics.py`
-- Doc CLI: `docs/recommender_cli.md`
 
+- Config: `configs/recommender.toml`, `configs/recommender_<qid>.toml`
+- CLI: `src/recommender/cli.py`, `src/recommender/multi_route_cli.py`
+- Orquestador: `src/recommender/scorer.py`
+- BD: `src/recommender/utils_db.py`, `sql/schema.sql`
+- Ruta: `src/recommender/route_planner.py`, `src/recommender/route_builder.py`
+- Evaluacion: `src/recommender/eval/evaluate.py`, `src/recommender/eval/evaluate_routes.py`
+- Benchmark: `src/recommender/benchmark_3cities.py`
+- Figuras: `scripts/generate_tfg_figures.py`
+- Doc CLI: `docs/recommender_cli.md`
+- Dossier: `docs/tfg_dossier_completo.md`
