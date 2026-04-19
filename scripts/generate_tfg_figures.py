@@ -355,11 +355,13 @@ def fig_01_pipeline_sistema():
             "#F18F01",
             [
                 "Content\n(TF-IDF)",
-                "Item-Item\n(co-visitation)",
-                "Markov\n(transiciones)",
+                "Item-Item\n(co-visit.)",
+                "Markov\n(transic.)",
                 "Embed\n(Word2Vec)",
-                "ALS\n(factorización)",
-                "Hybrid\n(combinado)",
+                "ALS\n(impl. CF)",
+                "Hybrid\n(fusión)",
+                "RRF\n(rank fus.)",
+                "Popular\n(baseline)",
             ],
         ),
         (
@@ -368,7 +370,7 @@ def fig_01_pipeline_sistema():
             "#C73E1D",
             [
                 "Normalización de scores",
-                "Fusión híbrida ponderada",
+                "Fusión: hybrid ponderado + RRF automático",
                 "Reranking (distancia, precio, diversidad)",
                 "NN + 2-opt ordering",
                 "GeoJSON + Folium export",
@@ -401,11 +403,13 @@ def fig_01_pipeline_sistema():
         ax.text(1.05, y + 0.52, title, fontsize=13, fontweight="bold", color=color, va="center")
 
         if idx == 2:
+            n_engines = len(items)
+            gap = 0.05
             x0 = 0.98
-            w = 1.28
+            w = (9.0 - x0 - gap * (n_engines - 1)) / n_engines
             for i, item in enumerate(items):
                 b = patches.FancyBboxPatch(
-                    (x0 + i * (w + 0.08), y - 0.63),
+                    (x0 + i * (w + gap), y - 0.63),
                     w,
                     1.04,
                     boxstyle="round,pad=0.02,rounding_size=0.08",
@@ -414,10 +418,10 @@ def fig_01_pipeline_sistema():
                     facecolor=mcolors.to_rgba(color, 0.28),
                 )
                 ax.add_patch(b)
-                ax.text(x0 + i * (w + 0.08) + w / 2, y - 0.11, item, ha="center", va="center", fontsize=8.2)
+                ax.text(x0 + i * (w + gap) + w / 2, y - 0.11, item, ha="center", va="center", fontsize=7.5)
         else:
             for j, item in enumerate(items):
-                ax.text(1.05, y + 0.06 - j * 0.33, f"• {item}", fontsize=9.6, color="#2B2B2B", va="center")
+                ax.text(1.05, y + 0.06 - j * 0.28, f"• {item}", fontsize=9.6, color="#2B2B2B", va="center")
 
     for y1, y2 in [(17.2, 16.3), (14.2, 13.3), (11.0, 10.2), (7.3, 6.2)]:
         ax.annotate("", xy=(5.0, y2), xytext=(5.0, y1), arrowprops=dict(arrowstyle="-|>", lw=1.9, color="#444"))
@@ -1027,35 +1031,103 @@ def fig_13_barras_agrupadas():
 
 
 def fig_14_radar_chart():
+    """Radar con selección de motores más representativos (Opción C: sin solapamiento)."""
     metrics = ["hit", "precision", "recall", "ndcg", "novelty", "diversity"]
+    metric_labels = ["Hit@K", "Precision@K", "Recall@K", "nDCG@K", "Novelty", "Diversity"]
+    # Selección: mejor meta-modelo, mejor secuencial, híbrido, co-visit., baseline fuerte, control
+    selected = ["rrf", "markov", "hybrid", "item", "popular", "random"]
+    palette = {
+        "rrf":     "#E63946",
+        "markov":  "#457B9D",
+        "hybrid":  "#2A9D8F",
+        "item":    "#F4A261",
+        "popular": "#8338EC",
+        "random":  "#444444",
+    }
+
     frames = [load_eval_results(qid) for qid in CITY_META]
     d = pd.concat(frames, ignore_index=True)
     agg = d.groupby("mode")[metrics].mean().reset_index()
+    agg = agg[agg["mode"].isin(selected)].set_index("mode").reindex(selected).reset_index()
     if agg.empty:
         raise RuntimeError("Sin datos para radar chart.")
 
-    labels = metrics
-    n = len(labels)
+    n = len(metrics)
     angles = np.linspace(0, 2 * np.pi, n, endpoint=False).tolist()
     angles += angles[:1]
 
     fig, ax = plt.subplots(figsize=(9, 9), subplot_kw=dict(polar=True))
     for _, row in agg.iterrows():
-        vals = [float(row[m]) for m in labels]
-        vals += vals[:1]
         mode_name = str(row["mode"])
-        if mode_name == "random":
-            ax.plot(angles, vals, linewidth=2.2, linestyle="--", color="#444444", label="random (baseline)")
-            ax.fill(angles, vals, alpha=0.06, color="#999999")
-        else:
-            ax.plot(angles, vals, linewidth=2, label=mode_name)
-            ax.fill(angles, vals, alpha=0.10)
+        vals = [float(row[m]) for m in metrics] + [float(row[metrics[0]])]
+        color = palette.get(mode_name, "#888888")
+        lw = 2.8 if mode_name in ("rrf", "markov") else 2.0
+        ls = "--" if mode_name == "random" else "-"
+        alpha = 0.07 if mode_name == "random" else 0.12
+        label = "random (control)" if mode_name == "random" else mode_name
+        ax.plot(angles, vals, linewidth=lw, linestyle=ls, color=color, label=label)
+        ax.fill(angles, vals, alpha=alpha, color=color)
+
     ax.set_xticks(angles[:-1])
-    ax.set_xticklabels(labels)
+    ax.set_xticklabels(metric_labels, fontsize=11)
     ax.set_ylim(0, 1)
-    ax.set_title("Radar multi-métrica por engine (media 3 ciudades, incluye baseline random)", fontsize=14, fontweight="bold")
-    ax.legend(loc="upper right", bbox_to_anchor=(1.24, 1.1))
+    ax.yaxis.set_tick_params(labelsize=8)
+    ax.set_title(
+        "Radar multi-métrica: motores principales\n(media 3 ciudades · als, embed, content omitidos por claridad)",
+        fontsize=13, fontweight="bold", pad=18,
+    )
+    ax.legend(loc="upper right", bbox_to_anchor=(1.28, 1.12), fontsize=10)
     fig.savefig(_save("fig_14_radar_chart.png"), dpi=300, bbox_inches="tight")
+    plt.close(fig)
+
+
+def fig_14b_heatmap_metricas():
+    """Heatmap completo modo × métrica (Opción B: todos los motores, sin solapamiento)."""
+    try:
+        import seaborn as sns
+    except ImportError:
+        missing_dep("seaborn")
+        raise
+
+    metrics = ["hit", "precision", "recall", "ndcg", "novelty", "diversity"]
+    metric_labels = ["Hit@K", "Precision@K", "Recall@K", "nDCG@K", "Novelty", "Diversity"]
+
+    frames = [load_eval_results(qid) for qid in CITY_META]
+    d = pd.concat(frames, ignore_index=True)
+    agg = d.groupby("mode")[metrics].mean()
+
+    # Orden descendente por Hit@K
+    agg = agg.sort_values("hit", ascending=False)
+
+    # Normalizar 0-1 por columna para el color (los valores anotados son los reales)
+    col_min = agg.min()
+    col_max = agg.max()
+    normalized = (agg - col_min) / (col_max - col_min + 1e-12)
+
+    fig, ax = plt.subplots(figsize=(11, 7))
+    sns.heatmap(
+        normalized,
+        annot=agg.round(3),
+        fmt=".3f",
+        cmap="RdYlGn",
+        ax=ax,
+        linewidths=0.6,
+        linecolor="#E0E0E0",
+        cbar_kws={"label": "valor normalizado por columna  (0 = peor · 1 = mejor)"},
+        xticklabels=metric_labels,
+        vmin=0, vmax=1,
+        annot_kws={"size": 9},
+    )
+    ax.set_xlabel("Métrica", fontsize=11)
+    ax.set_ylabel("Motor", fontsize=11)
+    plt.xticks(rotation=30, ha="right", fontsize=10)
+    plt.yticks(rotation=0, fontsize=10)
+    ax.set_title(
+        "Comparativa de motores: todas las métricas (media 3 ciudades · ordenado por Hit@K)",
+        fontsize=13, fontweight="bold",
+    )
+    fig.tight_layout()
+    fig.savefig(_save("fig_14b_heatmap_metricas.png"), dpi=300, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -1479,6 +1551,7 @@ def _figure_registry() -> dict[str, Callable[[], None]]:
         "fig_17": fig_17_long_tail_usuarios,
         "fig_18": fig_18_heatmap_temporal,
         "fig_19": fig_19_longitud_trails,
+        "fig_14b": fig_14b_heatmap_metricas,
         "fig_20": fig_20_eval_protocolo,
     }
 
