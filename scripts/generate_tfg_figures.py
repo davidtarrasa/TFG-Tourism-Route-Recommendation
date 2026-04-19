@@ -1907,6 +1907,378 @@ def fig_22_comparativa_hit():
     log("fig_22_comparativa_hit — OK")
 
 
+def _build_poi_transitions(visits: pd.DataFrame, pois: pd.DataFrame, top_n: int = 40):
+    """Devuelve (edges, poi_info) donde edges = list[(from_id, to_id, count)]
+    y poi_info = DataFrame con poi_id, name, lat, lon, primary_category, visit_count."""
+    from collections import Counter, defaultdict
+    visits_s = visits.sort_values(["trail_id", "timestamp"])
+    trans: Counter = Counter()
+    for _, g in visits_s.groupby("trail_id"):
+        seq = g["poi_id"].tolist()
+        for a, b in zip(seq[:-1], seq[1:]):
+            if a != b:
+                trans[(a, b)] += 1
+
+    top_edges = trans.most_common(top_n)
+    poi_ids = {p for e in top_edges for p in e[0]}
+    # also include by visit frequency
+    vc = visits["poi_id"].value_counts()
+    poi_info = pois[pois["poi_id"].isin(poi_ids)].copy()
+    poi_info = poi_info.merge(vc.rename("visit_count"), left_on="poi_id", right_index=True, how="left")
+    poi_info["visit_count"] = poi_info["visit_count"].fillna(0)
+    poi_info = poi_info.dropna(subset=["lat", "lon"])
+    # filter edges to POIs with coords
+    valid_ids = set(poi_info["poi_id"])
+    edges = [(a, b, c) for (a, b), c in top_edges if a in valid_ids and b in valid_ids]
+    return edges, poi_info
+
+
+def _to_mercator(lat, lon):
+    import math
+    x = lon * 20037508.34 / 180
+    y = math.log(math.tan((90 + lat) * math.pi / 360)) / (math.pi / 180)
+    y = y * 20037508.34 / 180
+    return x, y
+
+
+def fig_23_markov_arcos():
+    """Arc map: top transiciones POI-POI como arcos curvos sobre mapa geográfico."""
+    try:
+        import contextily as ctx
+    except ImportError:
+        missing_dep("contextily")
+        raise
+
+    CITY_QID = "Q35765"
+    city = CITY_META[CITY_QID]
+
+    with get_db_connection() as conn:
+        visits = load_visits(conn, CITY_QID)
+        pois = load_pois(conn, CITY_QID)
+
+    edges, poi_info = _build_poi_transitions(visits, pois, top_n=50)
+    if not edges:
+        raise RuntimeError("Sin transiciones para arc map.")
+
+    poi_xy = {}
+    for _, row in poi_info.iterrows():
+        poi_xy[row["poi_id"]] = _to_mercator(row["lat"], row["lon"])
+
+    max_count = max(c for _, _, c in edges)
+    counts = np.array([c for _, _, c in edges], dtype=float)
+
+    xs = [poi_xy[a][0] for a, b, _ in edges] + [poi_xy[b][0] for a, b, _ in edges]
+    ys = [poi_xy[a][1] for a, b, _ in edges] + [poi_xy[b][1] for a, b, _ in edges]
+    pad = max(abs(max(xs) - min(xs)), abs(max(ys) - min(ys))) * 0.12
+    xlim = (min(xs) - pad, max(xs) + pad)
+    ylim = (min(ys) - pad, max(ys) + pad)
+
+    fig, ax = plt.subplots(figsize=(14, 12))
+    ax.set_xlim(*xlim)
+    ax.set_ylim(*ylim)
+    ax.set_aspect("equal")
+    _try_add_basemap(ax, ctx, ctx.providers.CartoDB.DarkMatter, zoom=13)
+
+    cmap = plt.cm.plasma
+    norm = mcolors.Normalize(vmin=counts.min(), vmax=counts.max())
+
+    for (a, b, cnt), count in zip(edges, counts):
+        if a not in poi_xy or b not in poi_xy:
+            continue
+        x0, y0 = poi_xy[a]
+        x1, y1 = poi_xy[b]
+        alpha = 0.30 + 0.65 * (cnt / max_count)
+        lw = 0.8 + 5.0 * (cnt / max_count)
+        color = cmap(norm(count))
+        style = f"arc3,rad={0.25 + 0.15 * (hash((a,b)) % 3)}"
+        arr = patches.FancyArrowPatch(
+            (x0, y0), (x1, y1),
+            connectionstyle=style,
+            arrowstyle="-|>",
+            mutation_scale=10 + 8 * (cnt / max_count),
+            linewidth=lw,
+            color=color,
+            alpha=alpha,
+            zorder=3,
+        )
+        ax.add_patch(arr)
+
+    # Nodos
+    vc = visits["poi_id"].value_counts()
+    top_pois = vc.head(30).index
+    poi_plot = poi_info[poi_info["poi_id"].isin(top_pois)]
+    for _, row in poi_plot.iterrows():
+        x, y = poi_xy.get(row["poi_id"], (None, None))
+        if x is None:
+            continue
+        sz = 20 + 60 * (row["visit_count"] / (vc.max() + 1))
+        ax.scatter(x, y, s=sz, c="#FFD54F", zorder=5, edgecolors="#333", linewidths=0.5, alpha=0.9)
+
+    sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+    sm.set_array([])
+    cbar = fig.colorbar(sm, ax=ax, fraction=0.025, pad=0.02, shrink=0.7)
+    cbar.set_label("Frecuencia de transición", color="white", fontsize=11)
+    cbar.ax.yaxis.set_tick_params(color="white")
+    plt.setp(cbar.ax.yaxis.get_ticklabels(), color="white")
+
+    ax.set_axis_off()
+    ax.set_title(f"Transiciones Markov aprendidas — {city['name']} (top 50 POI→POI)",
+                 fontsize=14, fontweight="bold", color="white", pad=12)
+    fig.patch.set_facecolor("#1a1a2e")
+    ax.set_facecolor("#1a1a2e")
+    fig.savefig(_save("fig_23_markov_arcos.png"), dpi=200, bbox_inches="tight", facecolor=fig.get_facecolor())
+    plt.close(fig)
+    log("fig_23_markov_arcos — OK")
+
+
+def fig_24_markov_grafo_mapa():
+    """Grafo Markov sobre mapa geográfico: nodos=POIs en lat/lon, aristas=prob de transición."""
+    try:
+        import contextily as ctx
+        import networkx as nx
+    except ImportError as e:
+        missing_dep(str(e))
+        raise
+
+    CITY_QID = "Q35765"
+    city = CITY_META[CITY_QID]
+
+    with get_db_connection() as conn:
+        visits = load_visits(conn, CITY_QID)
+        pois = load_pois(conn, CITY_QID)
+
+    edges, poi_info = _build_poi_transitions(visits, pois, top_n=60)
+    if not edges:
+        raise RuntimeError("Sin transiciones para grafo mapa.")
+
+    # Limitar a los top-25 POIs más involucrados en transiciones
+    poi_counts: Counter = Counter()
+    for a, b, c in edges:
+        poi_counts[a] += c
+        poi_counts[b] += c
+    top_poi_ids = {p for p, _ in poi_counts.most_common(25)}
+
+    poi_xy = {}
+    for _, row in poi_info.iterrows():
+        if row["poi_id"] in top_poi_ids:
+            poi_xy[row["poi_id"]] = _to_mercator(row["lat"], row["lon"])
+
+    edges_f = [(a, b, c) for a, b, c in edges if a in poi_xy and b in poi_xy]
+    if not edges_f:
+        raise RuntimeError("Sin aristas tras filtrar POIs.")
+
+    max_c = max(c for _, _, c in edges_f)
+
+    # Normalizaciones de transición: prob = count / sum_out
+    out_sum: Counter = Counter()
+    for a, b, c in edges_f:
+        out_sum[a] += c
+    edge_prob = [(a, b, c / out_sum[a]) for a, b, c in edges_f]
+
+    xs = [poi_xy[p][0] for p in poi_xy]
+    ys = [poi_xy[p][1] for p in poi_xy]
+    pad = max(abs(max(xs) - min(xs)), abs(max(ys) - min(ys))) * 0.12
+    xlim = (min(xs) - pad, max(xs) + pad)
+    ylim = (min(ys) - pad, max(ys) + pad)
+
+    cat_colors = {
+        "Food":          "#ff9800",
+        "Culture":       "#e91e63",
+        "Entertainment": "#9c27b0",
+        "Nature":        "#4caf50",
+        "Shopping":      "#2196f3",
+        "Transport":     "#00bcd4",
+        "Nightlife":     "#f44336",
+        "Service":       "#795548",
+        "Health":        "#8bc34a",
+        "Sports":        "#ff5722",
+        "Relaxation":    "#03a9f4",
+        "Family":        "#ffc107",
+        "Inconclusive":  "#78909c",
+    }
+    cat_map = poi_info.set_index("poi_id")["primary_category"].to_dict()
+
+    fig, ax = plt.subplots(figsize=(14, 12))
+    ax.set_xlim(*xlim)
+    ax.set_ylim(*ylim)
+    ax.set_aspect("equal")
+    _try_add_basemap(ax, ctx, ctx.providers.CartoDB.Positron, zoom=13)
+
+    vc = visits["poi_id"].value_counts()
+
+    # Aristas
+    for a, b, prob in edge_prob:
+        if prob < 0.05:
+            continue
+        x0, y0 = poi_xy[a]
+        x1, y1 = poi_xy[b]
+        lw = 0.8 + 6.0 * prob
+        alpha = 0.3 + 0.6 * prob
+        rad = 0.25 + 0.1 * (hash((a, b)) % 4)
+        arr = patches.FancyArrowPatch(
+            (x0, y0), (x1, y1),
+            connectionstyle=f"arc3,rad={rad}",
+            arrowstyle="-|>",
+            mutation_scale=8 + 6 * prob,
+            linewidth=lw,
+            color="#1565c0",
+            alpha=alpha,
+            zorder=3,
+        )
+        ax.add_patch(arr)
+
+    # Nodos
+    name_map = poi_info.set_index("poi_id")["name"].to_dict()
+    for pid, (x, y) in poi_xy.items():
+        vc_val = vc.get(pid, 1)
+        sz = 80 + 300 * (vc_val / (vc.max() + 1))
+        cat = cat_map.get(pid, "")
+        broad = _map_to_broad_category(cat)
+        color = cat_colors.get(broad, "#78909c")
+        ax.scatter(x, y, s=sz, c=color, zorder=5, edgecolors="white", linewidths=1.0, alpha=0.95)
+        name = name_map.get(pid, pid)
+        short = name[:18] + "…" if len(name) > 18 else name
+        ax.annotate(short, (x, y), xytext=(4, 4), textcoords="offset points",
+                    fontsize=6.5, color="#1a1a1a", zorder=6,
+                    bbox=dict(boxstyle="round,pad=0.15", fc="white", alpha=0.6, ec="none"))
+
+    # Leyenda categorías
+    legend_items = [plt.Line2D([0], [0], marker="o", color="w", markerfacecolor=c, markersize=8, label=cat)
+                    for cat, c in cat_colors.items()]
+    ax.legend(handles=legend_items, loc="lower right", fontsize=8, framealpha=0.85, title="Categoría")
+
+    ax.set_axis_off()
+    ax.set_title(f"Grafo Markov geográfico — {city['name']} (top 25 POIs, prob ≥ 0.05)",
+                 fontsize=13, fontweight="bold", pad=10)
+    fig.savefig(_save("fig_24_markov_grafo_mapa.png"), dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    log("fig_24_markov_grafo_mapa — OK")
+
+
+def fig_25_markov_vs_real():
+    """Comparativa lado a lado: transiciones aprendidas por Markov vs rutas reales del dataset."""
+    try:
+        import contextily as ctx
+    except ImportError:
+        missing_dep("contextily")
+        raise
+
+    CITY_QID = "Q35765"
+    city = CITY_META[CITY_QID]
+
+    with get_db_connection() as conn:
+        visits = load_visits(conn, CITY_QID)
+        pois = load_pois(conn, CITY_QID)
+
+    edges, poi_info = _build_poi_transitions(visits, pois, top_n=40)
+    poi_xy = {}
+    for _, row in poi_info.iterrows():
+        poi_xy[row["poi_id"]] = _to_mercator(row["lat"], row["lon"])
+
+    # Rutas reales: trails con >= 4 POIs con coords
+    pois_latlon = pois.dropna(subset=["lat", "lon"]).set_index("poi_id")
+    visits_s = visits.sort_values(["trail_id", "timestamp"])
+    real_trails = []
+    for _, g in visits_s.groupby("trail_id"):
+        seq = [(r["poi_id"], pois_latlon.loc[r["poi_id"], "lat"], pois_latlon.loc[r["poi_id"], "lon"])
+               for _, r in g.iterrows() if r["poi_id"] in pois_latlon.index]
+        if len(seq) >= 4:
+            real_trails.append(seq)
+    real_trails = real_trails[:60]
+
+    # Límites comunes (mercator)
+    all_xs = [poi_xy[a][0] for a, b, _ in edges if a in poi_xy and b in poi_xy]
+    all_xs += [poi_xy[b][0] for a, b, _ in edges if a in poi_xy and b in poi_xy]
+    all_ys = [poi_xy[a][1] for a, b, _ in edges if a in poi_xy and b in poi_xy]
+    all_ys += [poi_xy[b][1] for a, b, _ in edges if a in poi_xy and b in poi_xy]
+    for trail in real_trails:
+        for _, lat, lon in trail:
+            x, y = _to_mercator(lat, lon)
+            all_xs.append(x)
+            all_ys.append(y)
+    if not all_xs:
+        raise RuntimeError("Sin datos para fig_25.")
+
+    pad = max(abs(max(all_xs) - min(all_xs)), abs(max(all_ys) - min(all_ys))) * 0.10
+    xlim = (min(all_xs) - pad, max(all_xs) + pad)
+    ylim = (min(all_ys) - pad, max(all_ys) + pad)
+
+    fig, axes = plt.subplots(1, 2, figsize=(22, 10))
+    titles = [
+        f"Transiciones aprendidas — Markov\n(top 40 POI→POI, {city['name']})",
+        f"Rutas reales del dataset\n(60 trails ≥ 4 POIs, {city['name']})",
+    ]
+
+    for ax, title in zip(axes, titles):
+        ax.set_xlim(*xlim)
+        ax.set_ylim(*ylim)
+        ax.set_aspect("equal")
+        _try_add_basemap(ax, ctx, ctx.providers.CartoDB.Positron, zoom=12)
+        ax.set_axis_off()
+        ax.set_title(title, fontsize=12, fontweight="bold", pad=8)
+
+    # --- Subplot izquierda: arcos Markov ---
+    ax_m = axes[0]
+    max_c = max(c for _, _, c in edges) if edges else 1
+    cmap_m = plt.cm.Reds
+    norm_m = mcolors.Normalize(vmin=0, vmax=max_c)
+    for a, b, cnt in edges:
+        if a not in poi_xy or b not in poi_xy:
+            continue
+        x0, y0 = poi_xy[a]
+        x1, y1 = poi_xy[b]
+        alpha = 0.25 + 0.65 * (cnt / max_c)
+        lw = 0.6 + 4.5 * (cnt / max_c)
+        color = cmap_m(norm_m(cnt))
+        rad = 0.20 + 0.15 * (hash((a, b)) % 3)
+        arr = patches.FancyArrowPatch(
+            (x0, y0), (x1, y1),
+            connectionstyle=f"arc3,rad={rad}",
+            arrowstyle="-|>",
+            mutation_scale=7 + 5 * (cnt / max_c),
+            linewidth=lw,
+            color=color,
+            alpha=alpha,
+            zorder=3,
+        )
+        ax_m.add_patch(arr)
+    vc = visits["poi_id"].value_counts()
+    for pid, (x, y) in poi_xy.items():
+        sz = 15 + 50 * (vc.get(pid, 0) / (vc.max() + 1))
+        ax_m.scatter(x, y, s=sz, c="#b71c1c", zorder=5, alpha=0.8, edgecolors="white", linewidths=0.5)
+
+    sm = plt.cm.ScalarMappable(cmap=cmap_m, norm=norm_m)
+    sm.set_array([])
+    plt.colorbar(sm, ax=ax_m, fraction=0.025, pad=0.01, shrink=0.7, label="Frecuencia")
+
+    # --- Subplot derecha: rutas reales ---
+    ax_r = axes[1]
+    cmap_r = plt.cm.Blues
+    for i, trail in enumerate(real_trails):
+        alpha = 0.25 + 0.5 * (i / len(real_trails))
+        coords_m = [_to_mercator(lat, lon) for _, lat, lon in trail]
+        xs_t = [c[0] for c in coords_m]
+        ys_t = [c[1] for c in coords_m]
+        ax_r.plot(xs_t, ys_t, "-", color=cmap_r(0.4 + 0.5 * (i / len(real_trails))),
+                  linewidth=0.8, alpha=alpha, zorder=3)
+        ax_r.scatter(xs_t[0], ys_t[0], s=18, c="#1b5e20", zorder=5, alpha=0.85)
+        ax_r.scatter(xs_t[-1], ys_t[-1], s=18, c="#b71c1c", zorder=5, alpha=0.85)
+
+    from matplotlib.lines import Line2D
+    legend_r = [
+        Line2D([0], [0], color="none", marker="o", markerfacecolor="#1b5e20", markersize=7, label="Inicio"),
+        Line2D([0], [0], color="none", marker="o", markerfacecolor="#b71c1c", markersize=7, label="Fin"),
+    ]
+    ax_r.legend(handles=legend_r, loc="lower right", fontsize=9, framealpha=0.85)
+
+    fig.suptitle(f"Markov aprendido vs. comportamiento real — {city['name']}",
+                 fontsize=15, fontweight="bold", y=1.01)
+    fig.tight_layout()
+    fig.savefig(_save("fig_25_markov_vs_real.png"), dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    log("fig_25_markov_vs_real — OK")
+
+
 def _figure_registry() -> dict[str, Callable[[], None]]:
     return {
         "fig_01": fig_01_pipeline_sistema,
@@ -1932,6 +2304,9 @@ def _figure_registry() -> dict[str, Callable[[], None]]:
         "fig_20": fig_20_eval_protocolo,
         "fig_21": fig_20_comparativa_literatura,
         "fig_22": fig_22_comparativa_hit,
+        "fig_23": fig_23_markov_arcos,
+        "fig_24": fig_24_markov_grafo_mapa,
+        "fig_25": fig_25_markov_vs_real,
     }
 
 
