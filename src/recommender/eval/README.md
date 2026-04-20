@@ -111,7 +111,7 @@ Note: `scripts/generate_tfg_figures.py` reads `*_latest.json` files with priorit
 
 ## Comparativa con la literatura
 
-La figura `data/reports/figures/tfg/fig_20_comparativa_literatura.png`
+La figura `data/reports/figures/tfg/fig_21_comparativa_literatura.png`
 posiciona los resultados del TFG respecto a métodos publicados.
 
 ### Métodos ML tradicionales (mismo tipo que este sistema)

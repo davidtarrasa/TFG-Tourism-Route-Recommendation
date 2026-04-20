@@ -81,24 +81,26 @@ Incluye PNG/PDF/HTML y el CSV auxiliar de la figura de métricas.
 - Cómo leerla: igual que la versión HTML, enfocada a uso en memoria/presentación.
 
 ### `fig_23_markov_arcos.png`
-- Qué muestra: arcos POI→POI (top transiciones) sobre mapa.
-- Codificación:
-  - Grosor/color del arco = frecuencia de transición.
-  - Nodos destacados = POIs más visitados.
-- Cómo leerla: “carreteras” de movimiento más repetidas en comportamiento real.
+- Qué muestra: arcos POI→POI (top 40 transiciones) sobre mapa — **3 ciudades en subplots**.
+- Codificación: grosor/color del arco = frecuencia; nodos amarillos = POIs más visitados.
+- Cómo leerla: “corredores” de movimiento turístico más repetidos por ciudad.
 
 ### `fig_24_markov_grafo_mapa.png`
-- Qué muestra: grafo Markov geográfico (nodos POI con coordenadas reales).
-- Codificación:
-  - Nodos por categoría amplia.
-  - Aristas con probabilidad mínima (filtrado) para evitar ruido.
+- Qué muestra: grafo Markov geográfico (nodos POI en lat/lon real) — **3 ciudades en subplots**.
+- Codificación: color de nodo = categoría amplia; tamaño = visitas; aristas = prob ≥ 0.05.
+- Leyenda compartida en la parte inferior.
 - Cómo leerla: estructura de movilidad + semántica de categorías en el espacio urbano.
 
 ### `fig_25_markov_vs_real.png`
-- Qué muestra: comparativa lado a lado.
-  - Izquierda: transiciones aprendidas por Markov.
-  - Derecha: rutas reales del dataset.
-- Cómo leerla: grado de alineación entre patrón aprendido y comportamiento observado.
+- Qué muestra: comparativa 3 filas × 2 cols — **3 ciudades**, cada una con:
+  - Izquierda: transiciones aprendidas por Markov (arcos, escala Reds).
+  - Derecha: rutas reales del dataset (50 trails ≥ 4 POIs, inicio verde / fin rojo).
+- Cómo leerla: grado de alineación entre el patrón aprendido y el comportamiento observado.
+
+### `fig_26_cold_warm_breakdown.png`
+- Qué muestra: comparativa Hit@20 y nDCG@20 para usuarios **cold** (<5 visitas train) vs **warm** (≥5).
+- Layout: 2 filas (métricas) × 3 columnas (ciudades); barras agrupadas por motor.
+- Cómo leerla: los modelos colaborativos (ALS, Item) penalizan más a usuarios cold; Markov y Content son más robustos en cold start.
 
 ## 4) Modelos IA/ML y fusión híbrida
 
@@ -157,7 +159,7 @@ Incluye PNG/PDF/HTML y el CSV auxiliar de la figura de métricas.
 - Contenido clave: split `last_trail_user`, `--fair`, 9 motores, seed, ground truth, métricas, cold/warm.
 - Cómo leerla: documento de metodología evaluativa (ideal para capítulo experimental).
 
-### `fig_20_comparativa_literatura.png`
+### `fig_21_comparativa_literatura.png`
 - Qué muestra: posicionamiento del TFG frente a resultados reportados en literatura.
 - Cómo leerla: referencia contextual (comparación orientativa con cautelas de protocolo).
 

@@ -102,7 +102,7 @@ Salida consolidada:
 ## Generar figuras de tesis
 
 ```bash
-python scripts/generate_tfg_figures.py           # todas las figuras (25)
+python scripts/generate_tfg_figures.py           # todas las figuras (26)
 python scripts/generate_tfg_figures.py --only fig_12   # solo una
 python scripts/generate_tfg_figures.py --skip fig_03   # saltar una
 ```
