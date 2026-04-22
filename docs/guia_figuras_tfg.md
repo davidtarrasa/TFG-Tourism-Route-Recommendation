@@ -268,7 +268,7 @@ Lo que salta a la vista: hay muy pocos cuadrados azules — el **74% de la tabla
 
 **Métricas en el radar:** hit, precision, recall, ndcg, novelty, diversity.
 
-**Nota importante:** la media se calcula **solo sobre Osaka + Petaling Jaya** (Istanbul excluida por volumen ~4× inferior). ALS, Embed y Content omitidos por claridad visual; ver fig_14b para todos los motores.
+**Nota importante:** la media se calcula **solo sobre Osaka + Petaling Jaya** (Istanbul excluida por volumen ~4× inferior). ALS, Embed, Content, Item y Popular omitidos por claridad visual; ver fig_14b para todos los motores.
 
 **Cómo interpretarla:** cada motor aparece como un polígono. Un polígono más grande y equilibrado es mejor. Permite ver de un vistazo el "perfil" de cada motor: hybrid tiene un polígono grande pero algo irregular; popular tiene un perfil muy desequilibrado (alta diversity, bajo recall); random forma el polígono más pequeño.
 

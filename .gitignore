@@ -212,6 +212,9 @@ __marimo__/
 # Ignorar documentos locales grandes/no versionables
 TFG_estructura_y_plan.pdf
 
+# Memoria TFG en LaTeX (trabajo local, no versionable)
+docs/TFG_Memoria_IMAT_DavidTarrasa/
+
 # Ignorar carpetas de datos locales, pero permitir procesados y placeholders
 data/
 !data/README.md

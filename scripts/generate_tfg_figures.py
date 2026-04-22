@@ -1098,15 +1098,13 @@ def fig_14_radar_chart():
     """Radar con selección de motores más representativos (Opción C: sin solapamiento)."""
     metrics = ["hit", "precision", "recall", "ndcg", "novelty", "diversity"]
     metric_labels = ["Hit@K", "Precision@K", "Recall@K", "nDCG@K", "Novelty", "Diversity"]
-    # Selección: mejor meta-modelo, mejor secuencial, híbrido, co-visit., baseline fuerte, control
-    selected = ["rrf", "markov", "hybrid", "item", "popular", "random"]
+    # Selección: mejor meta-modelo, mejor secuencial, híbrido, control
+    selected = ["rrf", "markov", "hybrid", "random"]
     palette = {
-        "rrf":     "#E63946",
-        "markov":  "#457B9D",
-        "hybrid":  "#2A9D8F",
-        "item":    "#F4A261",
-        "popular": "#8338EC",
-        "random":  "#444444",
+        "rrf":    "#E63946",
+        "markov": "#457B9D",
+        "hybrid": "#2A9D8F",
+        "random": "#444444",
     }
 
     # Istanbul excluida: volumen ~4× menor que Osaka/PJ distorsiona la media agregada.
@@ -1139,7 +1137,7 @@ def fig_14_radar_chart():
     ax.set_ylim(0, 1)
     ax.yaxis.set_tick_params(labelsize=8)
     ax.set_title(
-        "Radar multi-métrica: motores principales\n(media Osaka + Petaling Jaya · als, embed, content omitidos por claridad)",
+        "Radar multi-métrica: motores principales\n(media Osaka + Petaling Jaya · als, embed, content, item, popular omitidos por claridad)",
         fontsize=13, fontweight="bold", pad=18,
     )
     ax.legend(loc="upper right", bbox_to_anchor=(1.28, 1.12), fontsize=10)
