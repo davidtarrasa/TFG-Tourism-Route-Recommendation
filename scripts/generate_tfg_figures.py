@@ -1109,7 +1109,9 @@ def fig_14_radar_chart():
         "random":  "#444444",
     }
 
-    frames = [load_eval_results(qid) for qid in CITY_META]
+    # Istanbul excluida: volumen ~4× menor que Osaka/PJ distorsiona la media agregada.
+    _EVAL_QIDS = ["Q35765", "Q864965"]  # Osaka + Petaling Jaya
+    frames = [load_eval_results(qid) for qid in _EVAL_QIDS]
     d = pd.concat(frames, ignore_index=True)
     agg = d.groupby("mode")[metrics].mean().reset_index()
     agg = agg[agg["mode"].isin(selected)].set_index("mode").reindex(selected).reset_index()
@@ -1137,7 +1139,7 @@ def fig_14_radar_chart():
     ax.set_ylim(0, 1)
     ax.yaxis.set_tick_params(labelsize=8)
     ax.set_title(
-        "Radar multi-métrica: motores principales\n(media 3 ciudades · als, embed, content omitidos por claridad)",
+        "Radar multi-métrica: motores principales\n(media Osaka + Petaling Jaya · als, embed, content omitidos por claridad)",
         fontsize=13, fontweight="bold", pad=18,
     )
     ax.legend(loc="upper right", bbox_to_anchor=(1.28, 1.12), fontsize=10)
@@ -1156,7 +1158,9 @@ def fig_14b_heatmap_metricas():
     metrics = ["hit", "precision", "recall", "ndcg", "novelty", "diversity"]
     metric_labels = ["Hit@K", "Precision@K", "Recall@K", "nDCG@K", "Novelty", "Diversity"]
 
-    frames = [load_eval_results(qid) for qid in CITY_META]
+    # Istanbul excluida: volumen ~4× menor que Osaka/PJ distorsiona la media agregada.
+    _EVAL_QIDS = ["Q35765", "Q864965"]  # Osaka + Petaling Jaya
+    frames = [load_eval_results(qid) for qid in _EVAL_QIDS]
     d = pd.concat(frames, ignore_index=True)
     agg = d.groupby("mode")[metrics].mean()
 
@@ -1187,7 +1191,7 @@ def fig_14b_heatmap_metricas():
     plt.xticks(rotation=30, ha="right", fontsize=10)
     plt.yticks(rotation=0, fontsize=10)
     ax.set_title(
-        "Comparativa de motores: todas las métricas (media 3 ciudades · ordenado por Hit@K)",
+        "Comparativa de motores: todas las métricas (media Osaka + Petaling Jaya · ordenado por Hit@K)",
         fontsize=13, fontweight="bold",
     )
     fig.tight_layout()
@@ -1609,8 +1613,11 @@ def fig_21_comparativa_literatura():
         ("markov",  "Markov (TFG)",    "#ffb74d"),
         ("item",    "Item-Item (TFG)", "#ef9a9a"),
     ]
+    # Istanbul excluida: volumen de datos ~4× menor que Osaka/PJ arrastra la media hacia abajo
+    # y no refleja el comportamiento real del sistema en ciudades con datos suficientes.
+    _EVAL_QIDS = ["Q35765", "Q864965"]  # Osaka + Petaling Jaya
     ndcg_per_mode: dict[str, list[float]] = {}
-    for qid in CITY_META:
+    for qid in _EVAL_QIDS:
         df = load_eval_results(qid)
         for _, row in df.iterrows():
             mode = str(row.get("mode", ""))
@@ -1701,7 +1708,7 @@ def fig_21_comparativa_literatura():
 
     p1 = mpatches.Patch(color="#9e9e9e", label="ML tradicional (literatura, NDCG@10)")
     p2 = mpatches.Patch(color="#ff9800", alpha=0.6,
-                        label="Este TFG (NDCG@20, media 3 ciudades)")
+                        label="Este TFG (NDCG@20, media Osaka + Petaling Jaya)")
     ax1.legend(handles=[p1, p2], loc="lower right", fontsize=8.5, framealpha=0.9)
 
     # ── Panel derecho ────────────────────────────────────────────────
@@ -1744,6 +1751,8 @@ def fig_21_comparativa_literatura():
         0.5, -0.05,
         "⚠  Comparación orientativa: TFG usa NDCG@20 + protocolo last_trail_user "
         "(trail recommendation)  ·  Literatura usa NDCG@10 + leave-one-out (next-POI prediction)\n"
+        "Media calculada sobre Osaka y Petaling Jaya (Istanbul excluida: ~4× menos datos, "
+        "resultados estructuralmente inferiores no representativos del sistema)\n"
         "Fuentes: Massive-STEPS 2025 (arXiv:2505.11239)  ·  Survey POI 2024 (arXiv:2410.02191)  "
         "·  FPMC WWW2010  ·  GETNext KDD2022",
         ha="center", fontsize=7.5, color="#757575", style="italic"
@@ -1771,8 +1780,10 @@ def fig_22_comparativa_hit():
         ("rrf",     "RRF (TFG)",       "#a5d6a7"),
     ]
 
+    # Istanbul excluida: volumen de datos ~4× menor que Osaka/PJ arrastra la media hacia abajo.
+    _EVAL_QIDS = ["Q35765", "Q864965"]  # Osaka + Petaling Jaya
     hit_per_mode: dict[str, list[float]] = {}
-    for qid in CITY_META:
+    for qid in _EVAL_QIDS:
         df = load_eval_results(qid)
         for _, row in df.iterrows():
             mode = str(row.get("mode", ""))
@@ -1853,7 +1864,7 @@ def fig_22_comparativa_hit():
 
     p1 = mpatches.Patch(color="#9e9e9e", label="ML tradicional (literatura, Hit@10)")
     p2 = mpatches.Patch(color="#ff9800", alpha=0.6,
-                        label="Este TFG (Hit@20, media 3 ciudades)")
+                        label="Este TFG (Hit@20, media Osaka + Petaling Jaya)")
     ax1.legend(handles=[p1, p2], loc="lower right", fontsize=8.5, framealpha=0.9)
 
     # ── Panel derecho ────────────────────────────────────────────────
@@ -1894,6 +1905,8 @@ def fig_22_comparativa_hit():
         0.5, -0.04,
         "⚠  Comparación orientativa: TFG usa Hit@20 + protocolo last_trail_user "
         "(trail recommendation)  ·  Literatura usa Hit@10 + leave-one-out (next-POI prediction)\n"
+        "Media calculada sobre Osaka y Petaling Jaya (Istanbul excluida: ~4× menos datos, "
+        "resultados estructuralmente inferiores no representativos del sistema)\n"
         "Fuentes: Massive-STEPS 2025 (arXiv:2505.11239)  ·  Survey POI 2024 (arXiv:2410.02191)  "
         "·  FPMC WWW2010  ·  GETNext KDD2022  ·  STAN WWW2021",
         ha="center", fontsize=7.5, color="#757575", style="italic"

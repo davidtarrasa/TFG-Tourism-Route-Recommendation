@@ -19,9 +19,7 @@ from typing import Callable
 
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
 import numpy as np
-import pandas as pd
 import psycopg
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -32,7 +30,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 try:
-    from recommender.category_intents import INCONCLUSIVE, classify_category_intent
+    from recommender.category_intents import classify_category_intent
     _HAS_INTENTS = True
 except Exception:
     _HAS_INTENTS = False
@@ -73,19 +71,24 @@ def _save(name: str) -> Path:
     return OUTPUT_DIR / name
 
 
+_INTENT_DISPLAY = {
+    "food": "Food", "culture": "Culture", "nature": "Nature",
+    "nightlife": "Nightlife", "shopping": "Shopping", "service": "Service",
+    "health": "Health", "entertainment": "Entertainment",
+    "transport": "Transport", "relaxation": "Relaxation",
+    "family": "Family", "sports": "Sports",
+}
+
+
 def _map_broad(cat: str) -> str:
     if not _HAS_INTENTS:
         return "Inconclusive"
+    raw = str(cat or "").strip()
+    if not raw:
+        return "Inconclusive"
     try:
-        intent = classify_category_intent(str(cat or ""))
-        return {
-            "food": "Food", "culture": "Culture", "nature": "Nature",
-            "nightlife": "Nightlife", "shopping": "Shopping", "service": "Service",
-            "health": "Health", "entertainment": "Entertainment",
-            "transport": "Transport", "relaxation": "Relaxation",
-            "family": "Family", "sports": "Sports",
-            INCONCLUSIVE: "Inconclusive",
-        }.get(intent, "Inconclusive")
+        intent, _, _ = classify_category_intent(raw, use_semantic=False)
+        return _INTENT_DISPLAY.get(intent, "Inconclusive")
     except Exception:
         return "Inconclusive"
 
@@ -104,7 +107,7 @@ def _visit_col(conn) -> tuple[str, str]:
 
 
 def _query_city_stats(conn) -> dict:
-    city_col, poi_col = _visit_col(conn)
+    city_col, _ = _visit_col(conn)
     stats: dict = {}
     for qid in CITY_META:
         with conn.cursor() as cur:
@@ -357,7 +360,7 @@ def fig_etl_flow():
          "#1b5e20", ""),
     ]
 
-    DB_Y = 0.0  # DB box handled separately
+
 
     def box_color(color: str) -> str:
         palette = {

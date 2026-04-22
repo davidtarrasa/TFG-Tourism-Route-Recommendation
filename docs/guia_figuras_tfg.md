@@ -155,12 +155,15 @@ Incluye PNG/PDF/HTML y el CSV auxiliar de la figura de métricas.
 - Cómo leerla: distancia de cada motor frente al baseline trivial; hybrid e item-item son consistentemente superiores.
 
 ### `fig_14_radar_chart.png`
-- Qué muestra: radar multi-métrica de motores seleccionados.
+- Qué muestra: radar multi-métrica de motores seleccionados (rrf, markov, hybrid, item, popular, random).
 - Métricas: hit, precision, recall, ndcg, novelty, diversity.
+- **Media calculada sobre Osaka + Petaling Jaya únicamente** (mismo criterio que fig_21/22/14b — Istanbul excluida por volumen ~4× inferior).
+- als, embed y content omitidos por claridad visual; ver fig_14b para todos los motores.
 - Cómo leerla: perfil equilibrado/fuerte-débil de cada motor en una sola vista.
 
 ### `fig_14b_heatmap_metricas.png`
-- Qué muestra: heatmap completo motor × métrica (media 3 ciudades), ordenado por hit.
+- Qué muestra: heatmap completo motor × métrica (media **Osaka + Petaling Jaya**), ordenado por hit.
+- Istanbul excluida del promedio: su volumen de datos es ~4× menor que el de las otras dos ciudades, lo que arrastra la media hacia abajo y no es representativo del comportamiento del sistema con datos suficientes.
 - Cómo leerla: visión compacta de dominancia relativa por métrica.
 
 ### `fig_15_curvas_metricas_k.png`
@@ -175,11 +178,14 @@ Incluye PNG/PDF/HTML y el CSV auxiliar de la figura de métricas.
 ### `fig_21_comparativa_literatura.png`
 - Qué muestra: posicionamiento del TFG frente a resultados reportados en literatura (NDCG@10 aproximado).
 - Referencias incluidas: BPR-MF, Markov puro, FPMC, Item-KNN (ML tradicional); GRU4Rec, GETNext, STHGCN (Deep Learning SOTA).
-- Nota: comparación orientativa — el TFG usa NDCG@20 y protocolo `last_trail_user`, la literatura usa NDCG@10 y leave-one-out.
-- Cómo leerla: los motores del TFG superan todos los baselines ML tradicionales; el mejor (Item-Item, 0.172) iguala GRU4Rec.
+- **Media calculada sobre Osaka + Petaling Jaya únicamente.** Istanbul se excluye del promedio porque su volumen de datos es ~4× menor que el de las otras ciudades (161 K check-ins vs 675 K en Osaka y 460 K en PJ). Esta diferencia de datos produce resultados estructuralmente inferiores que no reflejan el comportamiento del sistema en condiciones normales, sino la dificultad inherente al cold-start por escasez de datos. Incluirla distorsionaría la media comparativa hacia abajo de forma injusta.
+- Nota metodológica adicional: el TFG usa NDCG@20 y protocolo `last_trail_user` (trail recommendation), la literatura usa NDCG@10 y leave-one-out (next-POI prediction) — la comparación es orientativa, no directa.
+- Cómo leerla: los motores del TFG superan todos los baselines ML tradicionales; el mejor (Item-Item) iguala GRU4Rec y queda por debajo del SOTA de deep learning.
 
 ### `fig_22_comparativa_hit.png`
 - Qué muestra: comparativa específica de **Hit@K** entre resultados del TFG y referencias de literatura.
+- **Media calculada sobre Osaka + Petaling Jaya únicamente** (mismo criterio que fig_21 — ver nota de exclusión de Istanbul).
+- La nota de pie de la figura explica explícitamente la exclusión de Istanbul y la diferencia de protocolo con la literatura.
 - Cómo leerla: dónde se sitúan los motores del TFG respecto a baselines y estado del arte reportado.
 
 ---
