@@ -20,7 +20,7 @@ import pandas as pd
 from .multi_route_service import build_multi_routes
 from .prefs import parse_prefs
 from .scorer import recommend
-from .route_builder import build_route, to_folium_map, to_geojson
+from .route_builder import build_route, to_standalone_html, to_geojson
 from .route_planner import plan_route
 from .utils_db import get_conn, load_pois
 
@@ -45,6 +45,7 @@ def _build_route_outputs(
     out_html: str,
     out_geojson: str,
     k: int,
+    variant_name: str = "",
 ) -> Tuple[str, str]:
     from .config import DEFAULT_CONFIG_PATH, load_config
 
@@ -94,8 +95,9 @@ def _build_route_outputs(
     with open(out_geojson, "w", encoding="utf-8") as f:
         json.dump(gj, f, ensure_ascii=False, indent=2)
 
-    m = to_folium_map(ordered_df, anchor=anchor, route_modes=("drive",))
-    m.save(out_html)
+    html_content = to_standalone_html(ordered_df, anchor=anchor, variant_name=variant_name)
+    with open(out_html, "w", encoding="utf-8") as f:
+        f.write(html_content)
     return out_html, out_geojson
 
 
@@ -293,6 +295,7 @@ def main() -> None:
                 out_html=html_path,
                 out_geojson=geo_path,
                 k=args.k,
+                variant_name=name,
             )
             payload["maps"][name] = {"html": out_html, "geojson": out_geo}
             print(f"[{name}] map: {out_html}")

@@ -552,3 +552,230 @@ def to_folium_map(
 
     folium.LayerControl(collapsed=True).add_to(m)
     return m
+
+
+_STANDALONE_HTML_TEMPLATE = """\
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>__PAGE_TITLE__</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: #0a0a1a; color: #f0f0f0; }
+    #header { position: fixed; top: 0; left: 0; right: 0; z-index: 10001; height: 48px; padding: 8px 16px; background: rgba(10,10,26,0.97); border-bottom: 1px solid rgba(255,255,255,0.12); }
+    #header h1 { font-size: 15px; font-weight: 700; color: #e8e8f0; line-height: 1.2; }
+    #header p { font-size: 12px; color: #7878a0; margin-top: 1px; }
+    #map { position: fixed; top: 48px; left: 0; right: 0; bottom: 0; }
+    #route-legend {
+      position: fixed; bottom: 20px; right: 20px; z-index: 9999;
+      background: rgba(10,10,26,0.93); border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 10px; padding: 12px 14px; min-width: 220px; max-width: 340px;
+      max-height: 45vh; overflow-y: auto; font-size: 12px; color: #e0e0f0;
+      backdrop-filter: blur(6px);
+    }
+    .route-legend-title { font-weight: 700; font-size: 13px; margin-bottom: 8px; color: #c0c8ff; }
+    .route-legend-row { display: flex; align-items: center; gap: 7px; margin: 5px 0; cursor: pointer; }
+    .route-legend-color { display: inline-block; width: 16px; height: 8px; border-radius: 3px; flex-shrink: 0; }
+    .route-legend-check { accent-color: #4a7fff; }
+    #poi-list {
+      position: fixed; top: 50px; left: 10px; z-index: 9999;
+      background: rgba(10,10,26,0.93); border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 10px; padding: 10px 13px; min-width: 190px; max-width: 280px;
+      max-height: calc(100vh - 80px); overflow-y: auto; font-size: 12px; color: #e0e0f0;
+      backdrop-filter: blur(6px);
+    }
+    #poi-list h3 { font-size: 13px; font-weight: 700; color: #c0c8ff; margin-bottom: 6px; }
+    .poi-item { padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.08); }
+    .poi-item:last-child { border-bottom: none; }
+    .poi-item-name { font-weight: 600; font-size: 12px; }
+    .poi-item-meta { font-size: 11px; color: #7878a0; margin-top: 2px; }
+  </style>
+</head>
+<body>
+  <div id="header">
+    <h1>__PAGE_TITLE__</h1>
+    <p>__SUBTITLE__</p>
+  </div>
+  <div id="map"></div>
+  <div id="route-legend"></div>
+  <div id="poi-list"><h3>Paradas</h3></div>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+  const POIS = __POIS_JSON__;
+
+  function segmentColorBlue(idx, total) {
+    const n = Math.max(total - 1, 1);
+    const t = idx / n;
+    const hue = 220 - Math.round(45 * t);
+    return `hsl(${hue}, 90%, ${45 + Math.round(12 * t)}%)`;
+  }
+
+  function segmentColorWarm(idx) {
+    const warm = ["#ff6d00", "#ff7043", "#ff5722", "#f4511e"];
+    return warm[idx % warm.length];
+  }
+
+  async function osrmLeg(start, end) {
+    const [lat1, lon1] = start;
+    const [lat2, lon2] = end;
+    const url = `https://router.project-osrm.org/route/v1/driving/${lon1},${lat1};${lon2},${lat2}?overview=full&geometries=geojson`;
+    try {
+      const r = await fetch(url);
+      if (!r.ok) return null;
+      const data = await r.json();
+      const coords = data?.routes?.[0]?.geometry?.coordinates || [];
+      return coords.length ? coords.map(c => [+c[1], +c[0]]) : null;
+    } catch (_) { return null; }
+  }
+
+  const map = L.map("map", { zoomControl: true });
+  L.tileLayer(
+    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    { maxZoom: 19, attribution: "Esri" }
+  ).addTo(map);
+
+  const latlngs = POIS.filter(p => isFinite(p.lat) && isFinite(p.lon)).map(p => [p.lat, p.lon]);
+  if (latlngs.length) {
+    map.fitBounds(L.latLngBounds(latlngs).pad(0.2));
+  } else {
+    map.setView([0, 0], 2);
+  }
+  map.invalidateSize();
+
+  const markersLayer = L.layerGroup().addTo(map);
+  const routeLayer = L.layerGroup().addTo(map);
+  const legs = Math.max(latlngs.length - 1, 0);
+  const segStraight = new Array(legs).fill(null);
+  const segRoad = new Array(legs).fill(null);
+  const segVisible = new Array(legs).fill(true);
+
+  for (let i = 0; i < legs; i++) {
+    segStraight[i] = L.polyline([latlngs[i], latlngs[i + 1]], {
+      color: segmentColorWarm(i), weight: 2.8, opacity: 0.95, dashArray: "10,6"
+    }).addTo(routeLayer);
+    segRoad[i] = L.polyline([latlngs[i], latlngs[i + 1]], {
+      color: segmentColorBlue(i, legs), weight: 4, opacity: 0.98
+    }).addTo(routeLayer);
+  }
+
+  // Fetch OSRM road routes asynchronously — updates straight fallback lines in-place
+  (async () => {
+    for (let i = 0; i < legs; i++) {
+      const roadCoords = await osrmLeg(latlngs[i], latlngs[i + 1]);
+      if (roadCoords && roadCoords.length && segRoad[i]) segRoad[i].setLatLngs(roadCoords);
+    }
+  })();
+
+  // Numbered badges matching frontend style
+  POIS.forEach(poi => {
+    const icon = L.divIcon({
+      className: "",
+      html: `<div style="width:24px;height:24px;border-radius:50%;background:#0b3d91;color:#fff;font-size:12px;font-weight:700;line-height:24px;text-align:center;border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.45);">${poi.order}</div>`,
+      iconSize: [24, 24],
+      iconAnchor: [12, 12],
+    });
+    const m = L.marker([poi.lat, poi.lon], { icon }).addTo(markersLayer);
+    m.bindTooltip(`${poi.order}. ${poi.name}`, { direction: "top" });
+    m.bindPopup(`<strong>${poi.order}. ${poi.name}</strong><br/>${poi.primary_category} · Rating: ${poi.rating}`);
+  });
+
+  // Interactive legend with segment toggle
+  const legendEl = document.getElementById("route-legend");
+  if (legs > 0) {
+    const rows = Array.from({ length: legs }, (_, i) =>
+      `<label class="route-legend-row">
+        <input class="route-legend-check" type="checkbox" data-seg="${i}" checked/>
+        <span class="route-legend-color" style="background:${segmentColorBlue(i, legs)}"></span>
+        <span>Tramo ${i + 1}</span>
+      </label>`
+    );
+    legendEl.innerHTML = `<div class="route-legend-title">Orden de tramos (azul\\u00a0=\\u00a0ruta calles)</div>${rows.join("")}`;
+    legendEl.querySelectorAll(".route-legend-check").forEach(el => {
+      el.addEventListener("change", ev => {
+        const idx = +ev.target.dataset.seg;
+        const on = ev.target.checked;
+        segVisible[idx] = on;
+        [segStraight[idx], segRoad[idx]].forEach(layer => {
+          if (!layer) return;
+          if (on) routeLayer.addLayer(layer); else routeLayer.removeLayer(layer);
+        });
+      });
+    });
+  }
+
+  // Optional anchor (start point) marker
+  const ANCHOR = __ANCHOR_JSON__;
+  if (ANCHOR) {
+    const anchorIcon = L.divIcon({
+      className: "",
+      html: '<div style="width:26px;height:26px;border-radius:50%;background:#1a7f37;color:#fff;font-size:15px;font-weight:700;line-height:26px;text-align:center;border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.45);">&#9654;</div>',
+      iconSize: [26, 26],
+      iconAnchor: [13, 13],
+    });
+    L.marker(ANCHOR, { icon: anchorIcon }).addTo(markersLayer).bindTooltip("Inicio", { direction: "top" });
+  }
+
+  // POI list sidebar
+  const poiListEl = document.getElementById("poi-list");
+  POIS.forEach(poi => {
+    const item = document.createElement("div");
+    item.className = "poi-item";
+    item.innerHTML = `<div class="poi-item-name">${poi.order}. ${poi.name}</div><div class="poi-item-meta">${poi.primary_category} · \\u2B50 ${poi.rating}</div>`;
+    poiListEl.appendChild(item);
+  });
+  </script>
+</body>
+</html>
+"""
+
+
+def to_standalone_html(
+    df: pd.DataFrame,
+    anchor: Optional[Tuple[float, float]] = None,
+    variant_name: str = "",
+    city_name: str = "",
+) -> str:
+    """Generate a self-contained HTML file matching the web frontend's visual style.
+
+    Uses Leaflet.js with OSRM road routing, satellite basemap, numbered badges,
+    and an interactive segment legend — identical to what the frontend renders.
+    """
+    pois = []
+    for i, (_, row) in enumerate(df.iterrows()):
+        lat = float(row.get("lat", 0))
+        lon = float(row.get("lon", 0))
+        name = str(row.get("name", f"POI {i + 1}"))
+        category = str(row.get("primary_category", "") or "N/A")
+        rating_raw = row.get("rating", None)
+        try:
+            rating = (
+                f"{float(rating_raw):.1f}"
+                if rating_raw is not None and str(rating_raw) not in ("", "nan", "None")
+                else "N/A"
+            )
+        except (ValueError, TypeError):
+            rating = "N/A"
+        pois.append({"order": i + 1, "lat": lat, "lon": lon, "name": name, "primary_category": category, "rating": rating})
+
+    pois_json = json.dumps(pois, ensure_ascii=False).replace("</script>", r"<\/script>")
+    anchor_json = json.dumps(list(anchor)) if anchor is not None else "null"
+    label = variant_name.capitalize() if variant_name else "Ruta"
+    page_title = f"Ruta turística · {label}" + (f" · {city_name}" if city_name else "")
+    subtitle = (
+        (f"{city_name} · " if city_name else "")
+        + f"{len(pois)} paradas"
+        + (f" · {label}" if variant_name else "")
+    )
+
+    return (
+        _STANDALONE_HTML_TEMPLATE
+        .replace("__POIS_JSON__", pois_json)
+        .replace("__ANCHOR_JSON__", anchor_json)
+        .replace("__PAGE_TITLE__", html.escape(page_title))
+        .replace("__SUBTITLE__", html.escape(subtitle))
+    )
