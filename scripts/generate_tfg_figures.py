@@ -2084,10 +2084,9 @@ def _draw_grafo_on_ax(ax, visits, pois, ctx, top_n=60, top_pois=20, min_prob=0.0
     edge_prob = [(a, b, c / out_sum[a]) for a, b, c in edges_f]
 
     xs = [poi_xy[p][0] for p in poi_xy]; ys = [poi_xy[p][1] for p in poi_xy]
-    pad = max(abs(max(xs) - min(xs)), abs(max(ys) - min(ys))) * 0.12
+    pad = max(abs(max(xs) - min(xs)), abs(max(ys) - min(ys))) * 0.08
     ax.set_xlim(min(xs) - pad, max(xs) + pad)
     ax.set_ylim(min(ys) - pad, max(ys) + pad)
-    ax.set_aspect("equal")
     _try_add_basemap(ax, ctx, ctx.providers.CartoDB.Positron, zoom=12)
 
     for a, b, prob in edge_prob:
@@ -2126,26 +2125,27 @@ def fig_24_markov_grafo_mapa():
         missing_dep("contextily")
         raise
 
-    fig, axes = plt.subplots(1, 3, figsize=(36, 13))
+    fig, axes = plt.subplots(1, 3, figsize=(30, 12))
+    fig.subplots_adjust(wspace=0.03, left=0.01, right=0.99, top=0.88, bottom=0.16)
 
     with get_db_connection() as conn:
         for ax, (qid, meta) in zip(axes, CITY_META.items()):
             visits = load_visits(conn, qid)
             pois = load_pois(conn, qid)
-            _draw_grafo_on_ax(ax, visits, pois, ctx)
+            _draw_grafo_on_ax(ax, visits, pois, ctx, top_pois=20)
             ax.set_title(f"{meta['name']} — top 20 POIs (prob ≥ 0.05)",
-                         fontsize=13, fontweight="bold", pad=8)
+                         fontsize=14, fontweight="bold", pad=8)
 
     # Leyenda compartida
     legend_items = [plt.Line2D([0], [0], marker="o", color="w",
-                               markerfacecolor=c, markersize=9, label=cat)
+                               markerfacecolor=c, markersize=18, label=cat)
                     for cat, c in _CAT_COLORS.items() if cat != "Inconclusive"]
-    fig.legend(handles=legend_items, loc="lower center", ncol=6, fontsize=9,
-               framealpha=0.85, title="Categoría", bbox_to_anchor=(0.5, -0.04))
+    fig.legend(handles=legend_items, loc="lower center", ncol=4, fontsize=15,
+               title_fontsize=16, framealpha=0.92, title="Categoría",
+               bbox_to_anchor=(0.5, 0.01))
 
     fig.suptitle("Grafo Markov geográfico — nodos=POIs en lat/lon, aristas=prob de transición",
-                 fontsize=16, fontweight="bold", y=1.01)
-    fig.tight_layout()
+                 fontsize=17, fontweight="bold", y=0.96)
     fig.savefig(_save("fig_24_markov_grafo_mapa.png"), dpi=180, bbox_inches="tight")
     plt.close(fig)
     log("fig_24_markov_grafo_mapa — OK")

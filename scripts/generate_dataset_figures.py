@@ -284,11 +284,11 @@ def fig_er_diagram():
                         linestyle="dashed" if dashed else "solid"), zorder=4)
         horiz = abs(x1 - x0) > abs(y1 - y0)
         if cs:
-            dx, dy = (-0.22, 0.2) if horiz else (0.18, -0.1)
+            dx, dy = (0.28, 0.22) if horiz else (0.18, -0.1)
             ax.text(x0 + dx, y0 + dy, cs, ha="center", va="center",
                     fontsize=12, fontweight="bold", color="#c62828", zorder=5)
         if ce:
-            dx, dy = (0.22, 0.2) if horiz else (-0.18, 0.1)
+            dx, dy = (-0.28, 0.22) if horiz else (-0.18, 0.1)
             ax.text(x1 + dx, y1 + dy, ce, ha="center", va="center",
                     fontsize=12, fontweight="bold", color="#1565c0", zorder=5)
 
@@ -326,37 +326,37 @@ def fig_er_diagram():
 
 def fig_etl_flow():
     """Diagrama de flujo del pipeline ETL (CSV → PostgreSQL)."""
-    fig, ax = plt.subplots(figsize=(13, 16))
+    fig, ax = plt.subplots(figsize=(15, 19))
     ax.set_xlim(0, 13)
-    ax.set_ylim(0, 16)
+    ax.set_ylim(0, 19)
     ax.axis("off")
     fig.patch.set_facecolor("#fafafa")
     ax.set_facecolor("#fafafa")
 
     BW = 5.2   # box width
-    BH = 1.05  # box height
+    BH = 1.30  # box height
     CX = 4.5   # center x of main column
     FX = 10.2  # center x of output file labels
 
     # Steps: (y_center, title, subtitle, color, output_label)
     STEPS = [
-        (15.0, "Foursquare Dataset", "raw CSV — ~290 K check-ins · 3 ciudades",
+        (17.8, "Foursquare Dataset", "raw CSV — ~290 K check-ins · 3 ciudades",
          "#546e7a", ""),
-        (13.3, "01_clean_std.py", "Limpieza y normalización de check-ins",
+        (15.8, "01_clean_std.py", "Limpieza y normalización de check-ins",
          "#1565c0", "→ std_clean.csv"),
-        (11.6, "02_extract_ids.py", "Extracción de IDs únicos de venues",
+        (13.8, "02_extract_ids.py", "Extracción de IDs únicos de venues",
          "#1565c0", "→ venue_ids.txt"),
-        (9.9,  "03_fetch_pois.py", "Consulta API Foursquare (metadata POIs)",
+        (11.8, "03_fetch_pois.py", "Consulta API Foursquare (metadata POIs)",
          "#6a1b9a", "→ pois_raw.json"),
-        (8.2,  "04_normalize_pois.py", "Normalización y alineación de campos",
+        (9.8,  "04_normalize_pois.py", "Normalización y alineación de campos",
          "#1565c0", "→ pois_normalized.json"),
-        (6.5,  "05_label_categories.py", "Etiquetado de categorías y precios",
+        (7.8,  "05_label_categories.py", "Etiquetado de categorías y precios",
          "#1565c0", "→ category_price_labels.json"),
-        (4.8,  "06_impute_pois.py", "Imputación de datos faltantes (×3 ciudades)",
+        (5.8,  "06_impute_pois.py", "Imputación de datos faltantes (×3 ciudades)",
          "#1565c0", "→ pois_enriched_{QID}.json"),
-        (3.1,  "07_diagnostics.py", "Diagnóstico y validación de calidad",
+        (3.8,  "07_diagnostics.py", "Diagnóstico y validación de calidad",
          "#37474f", "→ informe diagnóstico"),
-        (1.4,  "08_load_postgres.py", "Carga a PostgreSQL (visits · pois · poi_categories)",
+        (1.8,  "08_load_postgres.py", "Carga a PostgreSQL (visits · pois · poi_categories)",
          "#1b5e20", ""),
     ]
 
@@ -377,17 +377,17 @@ def fig_etl_flow():
             (CX - BW / 2, y - BH / 2), BW, BH,
             boxstyle=bstyle, linewidth=1.8,
             edgecolor=color, facecolor=box_color(color), zorder=2))
-        ax.text(CX, y + 0.14, title,
-                ha="center", va="center", fontsize=10.5, fontweight="bold",
+        ax.text(CX, y + 0.17, title,
+                ha="center", va="center", fontsize=13.0, fontweight="bold",
                 color=color, zorder=3)
-        ax.text(CX, y - 0.22, subtitle,
-                ha="center", va="center", fontsize=8.5, color="#555555", zorder=3)
+        ax.text(CX, y - 0.25, subtitle,
+                ha="center", va="center", fontsize=11.0, color="#555555", zorder=3)
 
         if out_label:
             ax.annotate("", xy=(FX - 0.1, y), xytext=(CX + BW / 2, y),
-                        arrowprops=dict(arrowstyle="-|>", color="#999999", lw=1.2), zorder=3)
+                        arrowprops=dict(arrowstyle="-|>", color="#999999", lw=1.4), zorder=3)
             ax.text(FX + 0.05, y, out_label,
-                    ha="left", va="center", fontsize=8, color="#444444",
+                    ha="left", va="center", fontsize=10.5, color="#444444",
                     style="italic", zorder=3)
 
     # Down arrows between steps
@@ -399,22 +399,22 @@ def fig_etl_flow():
 
     # PostgreSQL DB cylinder-style box at bottom
     db_y = STEPS[-1][0] - BH / 2 - 0.5
-    db_h = 1.1
+    db_h = 1.3
     ax.add_patch(mpatches.FancyBboxPatch(
         (CX - BW / 2, db_y - db_h), BW, db_h,
         boxstyle="round,pad=0.1", linewidth=2.0,
         edgecolor="#1b5e20", facecolor="#c8e6c9", zorder=2))
     ax.add_patch(mpatches.Ellipse(
-        (CX, db_y), BW, 0.38,
+        (CX, db_y), BW, 0.42,
         linewidth=2.0, edgecolor="#1b5e20", facecolor="#a5d6a7", zorder=3))
     ax.text(CX, db_y - db_h / 2, "PostgreSQL DB",
-            ha="center", va="center", fontsize=12, fontweight="bold",
+            ha="center", va="center", fontsize=14, fontweight="bold",
             color="#1b5e20", zorder=4)
-    ax.text(CX, db_y - db_h / 2 - 0.28, "visits   ·   pois   ·   poi_categories",
-            ha="center", va="center", fontsize=9, color="#2e7d32", zorder=4)
+    ax.text(CX, db_y - db_h / 2 - 0.32, "visits   ·   pois   ·   poi_categories",
+            ha="center", va="center", fontsize=11, color="#2e7d32", zorder=4)
 
     ax.set_title("Pipeline ETL — del CSV Foursquare a PostgreSQL",
-                 fontsize=13, fontweight="bold", pad=10)
+                 fontsize=16, fontweight="bold", pad=10)
     fig.tight_layout()
     fig.savefig(_save("fig_etl_flow.png"), dpi=180, bbox_inches="tight",
                 facecolor=fig.get_facecolor())
