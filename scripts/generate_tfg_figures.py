@@ -363,66 +363,24 @@ def _save_sankey_fallback_png(
     plt.close(fig)
 
 
-def fig_01_pipeline_sistema():
-    fig, ax = plt.subplots(figsize=(12, 16))
+def _draw_pipeline_fig(layers, title, engine_idx=2):
+    """Core renderer for the pipeline architecture figure (Spanish & English)."""
+    LATEX_FIGS = ROOT_DIR / "docs" / "TFG_Memoria_IMAT_DavidTarrasa" / "figures"
+
+    # y positions chosen so every inter-box gap is exactly 1.0 units
+    # box height = 2.2, so box spans [y-1.2, y+1.0]
+    # API bottom = 3.8 → gaps: 7.0-6.0=1.0, 10.2-9.2=1.0, 13.4-12.4=1.0, 16.6-15.6=1.0
+    y_positions = [17.8, 14.6, 11.4, 8.2, 5.0]
+    # arrows span from upper-box bottom to lower-box top (centred, with 0.1 inset each end)
+    arrow_pairs = [(16.5, 15.7), (13.3, 12.5), (10.1, 9.3), (6.9, 6.1)]
+
+    fig, ax = plt.subplots(figsize=(12, 15))
     ax.set_xlim(0, 10)
     ax.set_ylim(0, 20)
     ax.axis("off")
 
-    layers = [
-        (
-            "FUENTES DE DATOS",
-            18.5,
-            "#2E86AB",
-            ["std_2018 (Semantic Trails)", "Foursquare Venues API", "Geoapify Routing API"],
-        ),
-        (
-            "ETL / PROCESAMIENTO",
-            15.5,
-            "#A23B72",
-            ["Limpieza y normalización", "Enriquecimiento POIs", "Carga PostgreSQL"],
-        ),
-        (
-            "MOTORES DE RECOMENDACIÓN",
-            12.1,
-            "#F18F01",
-            [
-                "Content\n(TF-IDF)",
-                "Item-Item\n(co-visit.)",
-                "Markov\n(transic.)",
-                "Embed\n(Word2Vec)",
-                "ALS\n(impl. CF)",
-                "Hybrid\n(fusión)",
-                "RRF\n(rank fus.)",
-                "Popular\n(baseline)",
-            ],
-        ),
-        (
-            "SCORING + RUTA",
-            8.5,
-            "#C73E1D",
-            [
-                "Normalización de scores",
-                "Fusión: hybrid ponderado + RRF automático",
-                "Reranking (distancia, precio, diversidad)",
-                "NN + 2-opt ordering",
-                "GeoJSON + Folium export",
-            ],
-        ),
-        (
-            "API + FRONTEND",
-            5.0,
-            "#3B1F2B",
-            [
-                "FastAPI /multi-recommend",
-                "Variantes: history/inputs/location/full",
-                "Interfaz web interactiva",
-                "Mapa Leaflet con rutas",
-            ],
-        ),
-    ]
-
-    for idx, (title, y, color, items) in enumerate(layers):
+    # ---- boxes ----
+    for idx, ((lbl, color, items), y) in enumerate(zip(layers, y_positions)):
         box = patches.FancyBboxPatch(
             (0.8, y - 1.2),
             8.4,
@@ -433,13 +391,13 @@ def fig_01_pipeline_sistema():
             facecolor=mcolors.to_rgba(color, 0.13),
         )
         ax.add_patch(box)
-        ax.text(1.05, y + 0.52, title, fontsize=13, fontweight="bold", color=color, va="center")
+        ax.text(1.05, y + 0.52, lbl, fontsize=13, fontweight="bold", color=color, va="center")
 
-        if idx == 2:
-            n_engines = len(items)
+        if idx == engine_idx:
+            n = len(items)
             gap = 0.05
             x0 = 0.98
-            w = (9.0 - x0 - gap * (n_engines - 1)) / n_engines
+            w = (9.0 - x0 - gap * (n - 1)) / n
             for i, item in enumerate(items):
                 b = patches.FancyBboxPatch(
                     (x0 + i * (w + gap), y - 0.63),
@@ -451,25 +409,74 @@ def fig_01_pipeline_sistema():
                     facecolor=mcolors.to_rgba(color, 0.28),
                 )
                 ax.add_patch(b)
-                ax.text(x0 + i * (w + gap) + w / 2, y - 0.11, item, ha="center", va="center", fontsize=7.5)
+                ax.text(x0 + i * (w + gap) + w / 2, y - 0.11, item,
+                        ha="center", va="center", fontsize=7.5)
         else:
             for j, item in enumerate(items):
-                ax.text(1.05, y + 0.06 - j * 0.28, f"• {item}", fontsize=9.6, color="#2B2B2B", va="center")
+                ax.text(1.05, y + 0.06 - j * 0.28, f"• {item}",
+                        fontsize=9.6, color="#2B2B2B", va="center")
 
-    for y1, y2 in [(17.2, 16.3), (14.2, 13.3), (11.0, 10.2), (7.3, 6.2)]:
-        ax.annotate("", xy=(5.0, y2), xytext=(5.0, y1), arrowprops=dict(arrowstyle="-|>", lw=1.9, color="#444"))
+    # ---- arrows (equal-length, perfectly centred) ----
+    for y1, y2 in arrow_pairs:
+        ax.annotate(
+            "", xy=(5.0, y2), xytext=(5.0, y1),
+            arrowprops=dict(arrowstyle="-|>", lw=1.9, color="#444"),
+        )
 
-    annotations = [
-        "ETL: src/etl/*.py",
-        "Scoring: src/recommender/scorer.py",
-        "Route: src/recommender/route_planner.py + route_builder.py",
-        "API: src/recommender/api.py",
-        "UI: frontend/index.html + frontend/app.js",
+    ax.set_title(title, fontsize=16, fontweight="bold", pad=14)
+    return fig, LATEX_FIGS
+
+
+def fig_01_pipeline_sistema():
+    layers = [
+        ("FUENTES DE DATOS", "#2E86AB",
+         ["std_2018 (Semantic Trails)", "Foursquare Venues API", "Geoapify Routing API"]),
+        ("ETL / PROCESAMIENTO", "#A23B72",
+         ["Limpieza y normalización", "Enriquecimiento POIs", "Carga PostgreSQL"]),
+        ("MOTORES DE RECOMENDACIÓN", "#F18F01",
+         ["Content\n(TF-IDF)", "Item-Item\n(co-visit.)", "Markov\n(transic.)",
+          "Embed\n(Word2Vec)", "ALS\n(impl. CF)", "Hybrid\n(fusión)",
+          "RRF\n(rank fus.)", "Popular\n(baseline)"]),
+        ("SCORING + RUTA", "#C73E1D",
+         ["Normalización de scores", "Fusión: hybrid ponderado + RRF automático",
+          "Reranking (distancia, precio, diversidad)", "NN + 2-opt ordering",
+          "GeoJSON + Leaflet export"]),
+        ("API + FRONTEND", "#3B1F2B",
+         ["FastAPI /multi-recommend", "Variantes: history/inputs/location/full",
+          "Interfaz web interactiva", "Mapa Leaflet con rutas"]),
     ]
-    ax.text(0.82, 1.02, "\n".join(annotations), fontsize=8.8, color="#333")
-    ax.set_title("Pipeline completo del sistema de recomendación turística", fontsize=16, fontweight="bold", pad=14)
-    fig.savefig(_save("fig_01_pipeline_sistema.png"), dpi=300, bbox_inches="tight")
+    fig, latex_figs = _draw_pipeline_fig(
+        layers, "Pipeline completo del sistema de recomendación turística"
+    )
+    for dest in [_save("fig_01_pipeline_sistema.png"), latex_figs / "fig_01_pipeline_sistema.png"]:
+        fig.savefig(dest, dpi=300, bbox_inches="tight")
     fig.savefig(_save("fig_01_pipeline_sistema.pdf"), dpi=300, bbox_inches="tight")
+    plt.close(fig)
+
+
+def fig_01_pipeline_sistema_en():
+    layers = [
+        ("DATA SOURCES", "#2E86AB",
+         ["std_2018 (Semantic Trails)", "Foursquare Venues API", "Geoapify Routing API"]),
+        ("ETL / PROCESSING", "#A23B72",
+         ["Cleaning and normalisation", "POI enrichment", "PostgreSQL loading"]),
+        ("RECOMMENDATION ENGINES", "#F18F01",
+         ["Content\n(TF-IDF)", "Item-Item\n(co-visit.)", "Markov\n(transit.)",
+          "Embed\n(Word2Vec)", "ALS\n(impl. CF)", "Hybrid\n(fusion)",
+          "RRF\n(rank fus.)", "Popular\n(baseline)"]),
+        ("SCORING + ROUTING", "#C73E1D",
+         ["Score normalisation", "Fusion: weighted hybrid + automatic RRF",
+          "Reranking (distance, price, diversity)", "NN + 2-opt ordering",
+          "GeoJSON + Leaflet export"]),
+        ("API + FRONTEND", "#3B1F2B",
+         ["FastAPI /multi-recommend", "Variants: history/inputs/location/full",
+          "Interactive web interface", "Leaflet map with routes"]),
+    ]
+    fig, latex_figs = _draw_pipeline_fig(
+        layers, "Complete Pipeline of the Tourism Recommendation System"
+    )
+    for dest in [_save("fig_01_pipeline_sistema_en.png"), latex_figs / "fig_01_pipeline_sistema_en.png"]:
+        fig.savefig(dest, dpi=300, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -2299,6 +2306,7 @@ def fig_26_cold_warm_breakdown():
 def _figure_registry() -> dict[str, Callable[[], None]]:
     return {
         "fig_01": fig_01_pipeline_sistema,
+        "fig_01_en": fig_01_pipeline_sistema_en,
         "fig_02": fig_02_pois_mapa_categorias,
         "fig_03": fig_03_heatmap_checkins,
         "fig_04": fig_04_hexbin_rating,
