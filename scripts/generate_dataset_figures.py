@@ -378,16 +378,16 @@ def fig_etl_flow():
             boxstyle=bstyle, linewidth=1.8,
             edgecolor=color, facecolor=box_color(color), zorder=2))
         ax.text(CX, y + 0.17, title,
-                ha="center", va="center", fontsize=13.0, fontweight="bold",
+                ha="center", va="center", fontsize=20.0, fontweight="bold",
                 color=color, zorder=3)
         ax.text(CX, y - 0.25, subtitle,
-                ha="center", va="center", fontsize=11.0, color="#555555", zorder=3)
+                ha="center", va="center", fontsize=13.0, color="#555555", zorder=3)
 
         if out_label:
             ax.annotate("", xy=(FX - 0.1, y), xytext=(CX + BW / 2, y),
                         arrowprops=dict(arrowstyle="-|>", color="#999999", lw=1.4), zorder=3)
             ax.text(FX + 0.05, y, out_label,
-                    ha="left", va="center", fontsize=10.5, color="#444444",
+                    ha="left", va="center", fontsize=17.0, color="#444444",
                     style="italic", zorder=3)
 
     # Down arrows between steps
