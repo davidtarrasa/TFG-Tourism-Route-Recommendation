@@ -4,7 +4,7 @@
 
 **End-to-end tourism route recommender built on real Foursquare check-ins**
 
-*3 cities · 9 recommendation engines · FastAPI · PostgreSQL · Offline evaluation*
+_3 cities · 9 recommendation engines · FastAPI · PostgreSQL · Offline evaluation_
 
 ---
 
@@ -43,13 +43,13 @@
 
 A complete tourism route recommendation system that takes a user's check-in history, location, and preferences and returns a personalized itinerary — rendered as an interactive map.
 
-| | |
-|---|---|
-| **Dataset** | ~1.3M Foursquare check-ins across 3 cities |
-| **Cities** | Osaka 🇯🇵 · Istanbul 🇹🇷 · Petaling Jaya 🇲🇾 |
-| **Engines** | 9 recommendation modes (content → deep hybrid) |
-| **Output** | Interactive HTML map + GeoJSON route |
-| **Evaluation** | Hit@20, nDCG@20, Precision, Recall, Novelty, Diversity |
+|                 |                                                                |
+| --------------- | -------------------------------------------------------------- |
+| **Dataset**     | ~1.3M Foursquare check-ins across 3 cities                     |
+| **Cities**      | Osaka 🇯🇵 · Istanbul 🇹🇷 · Petaling Jaya 🇲🇾                      |
+| **Engines**     | 9 recommendation modes (content → deep hybrid)                 |
+| **Output**      | Interactive HTML map + GeoJSON route                           |
+| **Evaluation**  | Hit@20, nDCG@20, Precision, Recall, Novelty, Diversity         |
 | **Best result** | Hit@20 = **0.450** (Osaka hybrid), **0.302** Istanbul (Markov) |
 
 ---
@@ -116,11 +116,11 @@ python -m uvicorn src.recommender.api:app --reload --port 8000
 python -m http.server 8081
 ```
 
-| URL | Description |
-|-----|-------------|
-| `http://localhost:8081/frontend/` | Web UI |
-| `http://127.0.0.1:8000/health` | API health check |
-| `http://localhost:5050` | pgAdmin (DB explorer) |
+| URL                               | Description           |
+| --------------------------------- | --------------------- |
+| `http://localhost:8081/frontend/` | Web UI                |
+| `http://127.0.0.1:8000/health`    | API health check      |
+| `http://localhost:5050`           | pgAdmin (DB explorer) |
 
 **PowerShell shortcuts:**
 
@@ -163,17 +163,17 @@ python -m src.recommender.multi_route_cli \
 
 ## 🧠 Recommendation Engines
 
-| Engine | Mode key | Algorithm | Needs artifact |
-|--------|----------|-----------|---------------|
-| Content-based | `content` | TF-IDF over POI categories | ✗ |
-| Item-Item | `item` | Co-visitation similarity | ✗ |
-| Markov | `markov` | Sequential transitions order-1/2 + backoff | ✗ |
-| Embeddings | `embed` | Word2Vec nearest neighbors on trails | ✓ Word2Vec |
-| ALS | `als` | Implicit collaborative filtering (ALS) | ✓ ALS model |
-| **Hybrid** | `hybrid` | Weighted fusion of all 5 above (per-city tuned) | ✓ Both |
-| RRF | `rrf` | Reciprocal Rank Fusion `1/(rrf_k+rank)` auto-combining all 5 | ✗ |
-| Popular | `popular` | Ranking by global visit frequency | ✗ |
-| Random | `random` | Random baseline | ✗ |
+| Engine        | Mode key  | Algorithm                                                    | Needs artifact |
+| ------------- | --------- | ------------------------------------------------------------ | -------------- |
+| Content-based | `content` | TF-IDF over POI categories                                   | ✗              |
+| Item-Item     | `item`    | Co-visitation similarity                                     | ✗              |
+| Markov        | `markov`  | Sequential transitions order-1/2 + backoff                   | ✗              |
+| Embeddings    | `embed`   | Word2Vec nearest neighbors on trails                         | ✓ Word2Vec     |
+| ALS           | `als`     | Implicit collaborative filtering (ALS)                       | ✓ ALS model    |
+| **Hybrid**    | `hybrid`  | Weighted fusion of all 5 above (per-city tuned)              | ✓ Both         |
+| RRF           | `rrf`     | Reciprocal Rank Fusion `1/(rrf_k+rank)` auto-combining all 5 | ✗              |
+| Popular       | `popular` | Ranking by global visit frequency                            | ✗              |
+| Random        | `random`  | Random baseline                                              | ✗              |
 
 Re-ranking signals applied on top: **distance**, **price/free**, **category diversity**, **declared preferences**.
 
@@ -256,17 +256,17 @@ Output JSON also includes `cold_warm_breakdown` (cold = <5 train visits, warm = 
 
 **Hit@20 — `last_trail_user --fair` protocol · seed=42 · max_users=300**
 
-| Mode | Osaka 🇯🇵 | Istanbul 🇹🇷 | Petaling Jaya 🇲🇾 |
-|------|:---------:|:-----------:|:-----------------:|
-| **hybrid** | **0.450** | 0.224 | **0.424** |
-| rrf | 0.443 | **0.247** | **0.424** |
-| markov | 0.380 | **0.302** | 0.333 |
-| item | 0.378 | 0.264 | 0.396 |
-| popular | 0.356 | 0.255 | 0.420 |
-| als | 0.325 | 0.075 | 0.248 |
-| embed | 0.253 | 0.004 | 0.148 |
-| content | 0.149 | 0.024 | 0.100 |
-| random | 0.000 | 0.012 | 0.000 |
+| Mode       | Osaka 🇯🇵  | Istanbul 🇹🇷 | Petaling Jaya 🇲🇾 |
+| ---------- | :-------: | :---------: | :--------------: |
+| **hybrid** | **0.450** |    0.224    |    **0.424**     |
+| rrf        |   0.443   |  **0.247**  |    **0.424**     |
+| markov     |   0.380   |  **0.302**  |      0.333       |
+| item       |   0.378   |    0.264    |      0.396       |
+| popular    |   0.356   |    0.255    |      0.420       |
+| als        |   0.325   |    0.075    |      0.248       |
+| embed      |   0.253   |    0.004    |      0.148       |
+| content    |   0.149   |    0.024    |      0.100       |
+| random     |   0.000   |    0.012    |      0.000       |
 
 Full metrics (precision, recall, nDCG, novelty, diversity, category metrics, cold/warm breakdown):
 → `data/reports/figures/tfg/fig_12_tabla_metricas.csv`
@@ -274,15 +274,15 @@ Full metrics (precision, recall, nDCG, novelty, diversity, category metrics, col
 
 **Comparison with literature (NDCG@10 approx.):**
 
-| Method | NDCG@10 | Source |
-|--------|---------|--------|
-| BPR-MF | 0.061 | Survey POI 2024 |
-| Markov | 0.068 | Massive-STEPS 2025 |
-| FPMC | 0.094 | Rendle et al. WWW 2010 |
-| Item-KNN | 0.105 | Survey POI 2024 |
-| **This TFG — Item-Item** | **0.172** | NDCG@20, 3-city avg |
-| GRU4Rec | 0.172 | Hidasi et al. ICLR 2016 |
-| GETNext | 0.241 | Yang et al. KDD 2022 |
+| Method                   | NDCG@10   | Source                  |
+| ------------------------ | --------- | ----------------------- |
+| BPR-MF                   | 0.061     | Survey POI 2024         |
+| Markov                   | 0.068     | Massive-STEPS 2025      |
+| FPMC                     | 0.094     | Rendle et al. WWW 2010  |
+| Item-KNN                 | 0.105     | Survey POI 2024         |
+| **This TFG — Item-Item** | **0.172** | NDCG@20, 3-city avg     |
+| GRU4Rec                  | 0.172     | Hidasi et al. ICLR 2016 |
+| GETNext                  | 0.241     | Yang et al. KDD 2022    |
 
 > Note: comparison is indicative — this TFG uses NDCG@20 + `last_trail_user` (trail recommendation), literature uses NDCG@10 + leave-one-out (next-POI prediction).
 
@@ -361,39 +361,39 @@ Output: `data/reports/figures/dataset/`
 <details>
 <summary>📁 Figure index (expand)</summary>
 
-| Figure | Description |
-|--------|-------------|
-| `fig_01` | System architecture — 5-layer pipeline |
-| `fig_02` | POI map by category (Osaka) |
-| `fig_03` | Check-in heatmap (interactive + static) |
-| `fig_04` | Hexbin rating map (Osaka) |
-| `fig_05` | Spatial comparison 3 cities |
-| `fig_06` | Markov transition heatmap (categories) |
-| `fig_07` | Markov directed graph (categories) |
-| `fig_08` | Sankey trail transitions (interactive + PNG) |
-| `fig_09` | t-SNE Word2Vec embeddings (Osaka) |
-| `fig_10` | ALS user-POI matrix |
-| `fig_11` | Hybrid weights by scenario |
-| `fig_12` | Full metrics table (visual + CSV) |
-| `fig_13` | nDCG@20 grouped bar chart |
-| `fig_14` | Multi-metric radar chart |
-| `fig_14b` | Engine × metric heatmap |
-| `fig_15` | Precision/Recall/nDCG bars (Osaka) |
-| `fig_16` | Category distribution (Osaka) |
-| `fig_17` | Long-tail user activity + Lorenz curve |
-| `fig_18` | Temporal heatmap (hour × weekday) |
-| `fig_19` | Trail length histogram |
-| `fig_20` | Evaluation protocol infographic |
-| `fig_21` | Literature comparison (nDCG) |
-| `fig_22` | Literature comparison (Hit@K) |
-| `fig_23` | Markov arc map — top 40 transitions (Osaka) |
-| `fig_24` | Geographic Markov graph (3 cities) |
-| `fig_25` | Markov learned vs real trails (Osaka) |
-| `fig_26` | Cold vs warm user breakdown |
-| `fig_er_diagram` | Entity-Relationship diagram |
-| `fig_etl_flow` | ETL pipeline flowchart |
-| `fig_bubble_dataset` | Dataset volume + category bubble chart |
-| `fig_heatmap_coverage` | Dataset coverage heatmap (city × metric) |
+| Figure                 | Description                                  |
+| ---------------------- | -------------------------------------------- |
+| `fig_01`               | System architecture — 5-layer pipeline       |
+| `fig_02`               | POI map by category (Osaka)                  |
+| `fig_03`               | Check-in heatmap (interactive + static)      |
+| `fig_04`               | Hexbin rating map (Osaka)                    |
+| `fig_05`               | Spatial comparison 3 cities                  |
+| `fig_06`               | Markov transition heatmap (categories)       |
+| `fig_07`               | Markov directed graph (categories)           |
+| `fig_08`               | Sankey trail transitions (interactive + PNG) |
+| `fig_09`               | t-SNE Word2Vec embeddings (Osaka)            |
+| `fig_10`               | ALS user-POI matrix                          |
+| `fig_11`               | Hybrid weights by scenario                   |
+| `fig_12`               | Full metrics table (visual + CSV)            |
+| `fig_13`               | nDCG@20 grouped bar chart                    |
+| `fig_14`               | Multi-metric radar chart                     |
+| `fig_14b`              | Engine × metric heatmap                      |
+| `fig_15`               | Precision/Recall/nDCG bars (Osaka)           |
+| `fig_16`               | Category distribution (Osaka)                |
+| `fig_17`               | Long-tail user activity + Lorenz curve       |
+| `fig_18`               | Temporal heatmap (hour × weekday)            |
+| `fig_19`               | Trail length histogram                       |
+| `fig_20`               | Evaluation protocol infographic              |
+| `fig_21`               | Literature comparison (nDCG)                 |
+| `fig_22`               | Literature comparison (Hit@K)                |
+| `fig_23`               | Markov arc map — top 40 transitions (Osaka)  |
+| `fig_24`               | Geographic Markov graph (3 cities)           |
+| `fig_25`               | Markov learned vs real trails (Osaka)        |
+| `fig_26`               | Cold vs warm user breakdown                  |
+| `fig_er_diagram`       | Entity-Relationship diagram                  |
+| `fig_etl_flow`         | ETL pipeline flowchart                       |
+| `fig_bubble_dataset`   | Dataset volume + category bubble chart       |
+| `fig_heatmap_coverage` | Dataset coverage heatmap (city × metric)     |
 
 </details>
 
@@ -407,14 +407,14 @@ Defined in `src/recommender/api.py`. The browser **never** talks directly to Pos
 Frontend  →  FastAPI  →  Recommender + PostgreSQL
 ```
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/health` | Health check |
-| `POST` | `/recommend` | Single route recommendation |
-| `POST` | `/multi-recommend` | Multi-variant route (history · inputs · location · full) |
-| `POST` | `/saved-routes` | Save a route |
-| `GET` | `/saved-routes` | List saved routes |
-| `DELETE` | `/saved-routes` | Delete saved routes |
+| Method   | Endpoint           | Description                                              |
+| -------- | ------------------ | -------------------------------------------------------- |
+| `GET`    | `/health`          | Health check                                             |
+| `POST`   | `/recommend`       | Single route recommendation                              |
+| `POST`   | `/multi-recommend` | Multi-variant route (history · inputs · location · full) |
+| `POST`   | `/saved-routes`    | Save a route                                             |
+| `GET`    | `/saved-routes`    | List saved routes                                        |
+| `DELETE` | `/saved-routes`    | Delete saved routes                                      |
 
 ---
 
@@ -422,12 +422,12 @@ Frontend  →  FastAPI  →  Recommender + PostgreSQL
 
 Implemented in `src/recommender/multi_route_service.py`. One request returns up to 4 route variants:
 
-| Variant | When generated | Signal used |
-|---------|---------------|-------------|
-| `history` | User has check-in history in city | Collaborative + sequential |
-| `inputs` | Always (when preferences provided) | Content + declared prefs |
-| `location` | `lat`/`lon` provided | Geo-first, local radius |
-| `full` | Always | Blended — all available signals |
+| Variant    | When generated                     | Signal used                     |
+| ---------- | ---------------------------------- | ------------------------------- |
+| `history`  | User has check-in history in city  | Collaborative + sequential      |
+| `inputs`   | Always (when preferences provided) | Content + declared prefs        |
+| `location` | `lat`/`lon` provided               | Geo-first, local radius         |
+| `full`     | Always                             | Blended — all available signals |
 
 A soft **surprise POI** can be injected into `full` with low probability (configurable via `[surprise]` in `configs/recommender.toml`, flagged as `is_surprise=true`).
 
@@ -447,11 +447,11 @@ configs/
 
 Per-city tuning decisions applied:
 
-| City | Key decisions |
-|------|--------------|
-| Osaka | `context_n=2`, `rrf_k=30`, hybrid weights balanced across all engines |
-| Istanbul | `als_factors=128`, `rrf_k=30`, hybrid weights shifted toward Markov + Item |
-| Petaling Jaya | `context_n=3`, `rrf_k=30`, hybrid weights balanced |
+| City          | Key decisions                                                              |
+| ------------- | -------------------------------------------------------------------------- |
+| Osaka         | `context_n=2`, `rrf_k=30`, hybrid weights balanced across all engines      |
+| Istanbul      | `als_factors=128`, `rrf_k=30`, hybrid weights shifted toward Markov + Item |
+| Petaling Jaya | `context_n=3`, `rrf_k=30`, hybrid weights balanced                         |
 
 Config resolution: `src/recommender/config.py` → `load_config(path, city_qid)` → auto-loads per-city TOML.
 
@@ -493,11 +493,11 @@ Config resolution: `src/recommender/config.py` → `load_config(path, city_qid)`
 
 ### City QID reference
 
-| Wikidata QID | City | Country |
-|---|---|---|
-| `Q35765` | Osaka | 🇯🇵 Japan |
-| `Q406` | Istanbul | 🇹🇷 Turkey |
-| `Q864965` | Petaling Jaya | 🇲🇾 Malaysia |
+| Wikidata QID | City          | Country     |
+| ------------ | ------------- | ----------- |
+| `Q35765`     | Osaka         | 🇯🇵 Japan    |
+| `Q406`       | Istanbul      | 🇹🇷 Turkey   |
+| `Q864965`    | Petaling Jaya | 🇲🇾 Malaysia |
 
 ---
 
@@ -675,15 +675,15 @@ flowchart TD
 
 ## 📚 Documentation
 
-| Document | Contents |
-|----------|----------|
-| [`src/recommender/README.md`](src/recommender/README.md) | Engine internals, scoring, route building |
-| [`src/recommender/eval/README.md`](src/recommender/eval/README.md) | Evaluation methodology, protocol details, literature comparison |
-| [`frontend/README.md`](frontend/README.md) | Frontend architecture, UI features |
-| [`data/README.md`](data/README.md) | Data layout, PostgreSQL schema, city QID map |
-| [`docs/recommender_cli.md`](docs/recommender_cli.md) | CLI quick reference for all commands |
-| [`docs/guia_figuras_tfg.md`](docs/guia_figuras_tfg.md) | What each of the 30 figures shows and how to read it |
-| [`docs/tfg_dossier_completo.md`](docs/tfg_dossier_completo.md) | Full project dossier (motivation, design decisions, architecture) |
+| Document                                                           | Contents                                                          |
+| ------------------------------------------------------------------ | ----------------------------------------------------------------- |
+| [`src/recommender/README.md`](src/recommender/README.md)           | Engine internals, scoring, route building                         |
+| [`src/recommender/eval/README.md`](src/recommender/eval/README.md) | Evaluation methodology, protocol details, literature comparison   |
+| [`frontend/README.md`](frontend/README.md)                         | Frontend architecture, UI features                                |
+| [`data/README.md`](data/README.md)                                 | Data layout, PostgreSQL schema, city QID map                      |
+| [`docs/recommender_cli.md`](docs/recommender_cli.md)               | CLI quick reference for all commands                              |
+| [`docs/guia_figuras_tfg.md`](docs/guia_figuras_tfg.md)             | What each of the 30 figures shows and how to read it              |
+| [`docs/tfg_dossier_completo.md`](docs/tfg_dossier_completo.md)     | Full project dossier (motivation, design decisions, architecture) |
 
 ---
 
@@ -701,6 +701,6 @@ flowchart TD
 
 <div align="center">
 
-*TFG · Universidad · 2024–2025*
+_TFG · Universidad · 2025–2026_
 
 </div>
