@@ -476,10 +476,10 @@ def fig_bubble_dataset():
         # Center text: city + count
         n_v = stats[qid]["n_visits"]
         ax.text(0, 0.18, meta["name"],
-                ha="center", va="center", fontsize=12, fontweight="bold",
+                ha="center", va="center", fontsize=15, fontweight="bold",
                 color=meta["color"])
         ax.text(0, -0.22, f"{n_v:,}\ncheck-ins",
-                ha="center", va="center", fontsize=9, color="#444444",
+                ha="center", va="center", fontsize=12, color="#444444",
                 linespacing=1.3)
 
     # Shared legend at bottom
@@ -488,13 +488,14 @@ def fig_bubble_dataset():
         for c in all_cats if any(cat_dists[qid].get(c, 0) > 0 for qid in CITY_META)
     ]
     fig.legend(handles=legend_items, loc="lower center", ncol=6,
-               fontsize=9, framealpha=0.9,
-               bbox_to_anchor=(0.5, 0.02), title="Categorías amplias")
+               fontsize=12, framealpha=0.9,
+               bbox_to_anchor=(0.5, 0.02), title="Categorías amplias",
+               title_fontsize=12)
 
     fig.suptitle(
         "Volumen y composición del dataset — 3 ciudades\n"
         "(tamaño de burbuja proporcional a √check-ins)",
-        fontsize=13, fontweight="bold", y=0.96,
+        fontsize=15, fontweight="bold", y=0.96,
     )
 
     fig.savefig(_save("fig_bubble_dataset.png"), dpi=180, bbox_inches="tight",
