@@ -247,7 +247,7 @@ def fig_er_diagram():
             boxstyle="round,pad=0.05", linewidth=1.5,
             edgecolor=color, facecolor=color, zorder=2))
         ax.text(x0 + TW / 2, y_top - HH / 2, name,
-                ha="center", va="center", fontsize=11.5, fontweight="bold",
+                ha="center", va="center", fontsize=18, fontweight="bold",
                 color="white", family="monospace", zorder=3)
         # body
         ax.add_patch(mpatches.FancyBboxPatch(
@@ -266,10 +266,10 @@ def fig_er_diagram():
             nc = "#1b5e20" if is_pk else ("#4a148c" if is_fk else "#212121")
             fw = "bold" if (is_pk or is_fk) else "normal"
             ax.text(x0 + 0.18, y, col_name,
-                    ha="left", va="center", fontsize=8.0, color=nc,
+                    ha="left", va="center", fontsize=13.0, color=nc,
                     fontweight=fw, family="monospace", zorder=3)
             ax.text(x0 + TW - 0.1, y, col_type,
-                    ha="right", va="center", fontsize=7.5, color="#555555",
+                    ha="right", va="center", fontsize=12.5, color="#555555",
                     family="monospace", zorder=3)
 
         bounds[name] = (x0, y_top, x0 + TW, y_top - total_h)
@@ -286,11 +286,11 @@ def fig_er_diagram():
         if cs:
             dx, dy = (0.28, 0.22) if horiz else (0.18, -0.1)
             ax.text(x0 + dx, y0 + dy, cs, ha="center", va="center",
-                    fontsize=12, fontweight="bold", color="#c62828", zorder=5)
+                    fontsize=17, fontweight="bold", color="#c62828", zorder=5)
         if ce:
             dx, dy = (-0.28, 0.22) if horiz else (-0.18, 0.1)
             ax.text(x1 + dx, y1 + dy, ce, ha="center", va="center",
-                    fontsize=12, fontweight="bold", color="#1565c0", zorder=5)
+                    fontsize=17, fontweight="bold", color="#1565c0", zorder=5)
 
     # visits → pois (N:1)
     rel(bounds["visits"][2], 7.5, bounds["pois"][0], 7.5, cs="N", ce="1")
@@ -300,7 +300,7 @@ def fig_er_diagram():
     cx = bounds["pois"][0] + TW / 2
     rel(cx, bounds["pois"][3], cx, bounds["saved_routes"][1] + 0.02, dashed=True)
     mid_y = (bounds["pois"][3] + bounds["saved_routes"][1]) / 2
-    ax.text(cx + 0.2, mid_y, "city_qid", fontsize=8, color="#888888",
+    ax.text(cx + 0.2, mid_y, "city_qid", fontsize=13, color="#888888",
             style="italic", va="center")
 
     legend_items = [
@@ -309,9 +309,9 @@ def fig_er_diagram():
         mpatches.Patch(facecolor="none", edgecolor="#888888",
                        linewidth=1, label="Relación conceptual (dashed)"),
     ]
-    ax.legend(handles=legend_items, loc="lower left", fontsize=9, framealpha=0.9)
+    ax.legend(handles=legend_items, loc="lower left", fontsize=15, framealpha=0.9)
     ax.set_title("Diagrama Entidad-Relación — Esquema PostgreSQL",
-                 fontsize=14, fontweight="bold", pad=10)
+                 fontsize=19, fontweight="bold", pad=10)
 
     fig.tight_layout()
     fig.savefig(_save("fig_er_diagram.png"), dpi=180, bbox_inches="tight",
