@@ -520,22 +520,21 @@ flowchart TD
     AL["ALS\nFiltrado colaborativo implícito"]
     HY["Hybrid\nFusión ponderada"]
     RRF["RRF\nReciprocal Rank Fusion"]
-    POP["Popular\nBaseline por popularidad"]
     RANK["Re-ranking\n+ filtrado de ya visitados"]
     MAP[["🗺️ Mapa interactivo\n+ itinerario ordenado"]]
 
     U --> W --> API
     API --> DB
     API --> REC
-    REC --> CF & II & MK & EM & AL & HY & RRF & POP
-    CF & II & MK & EM & AL & HY & RRF & POP --> RANK
+    REC --> CF & II & MK & EM & AL & HY & RRF
+    CF & II & MK & EM & AL & HY & RRF --> RANK
     RANK --> MAP --> U
 
     classDef user fill:#4a90d9,color:#fff,stroke:#2c5f8a
     classDef engine fill:#f0a500,color:#fff,stroke:#c47e00
     classDef db fill:#5cb85c,color:#fff,stroke:#3d7a3d
     class U user
-    class CF,II,MK,EM,AL,HY,RRF,POP engine
+    class CF,II,MK,EM,AL,HY,RRF engine
     class DB db
 ```
 
