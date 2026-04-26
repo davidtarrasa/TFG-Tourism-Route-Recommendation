@@ -90,7 +90,7 @@ y exponerlo en CLI/API/web.
 ### 4.2 Entidades principales en PostgreSQL
 - `visits`: eventos de visita (usuario, trail, fsq_id, timestamp/secuencia, ciudad).
 - `pois`: metadatos de POI (fsq_id, nombre, lat/lon, rating, price, city/city_qid...).
-- `poi_categories`: categorias del POI (ordenadas por prioridad; `ord=0` principal).
+- `poi_categories`: categorias del POI (relacion POI-categoria, potencialmente multietiqueta).
 
 ### 4.3 Clave de ciudad
 Se ha consolidado filtro por `city_qid` para evitar inconsistencias por nombres multilenguaje (p. ej. Osaka vs 大阪市).

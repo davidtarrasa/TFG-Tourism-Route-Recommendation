@@ -22,7 +22,7 @@ Suggested naming:
 Active configs (auto-loaded por ciudad):
 
 - `configs/recommender.toml` — global fallback
-- `configs/recommender_q35765.toml` — Osaka: als.factors=128, markov.backoff=0.3, trail_current optimizado
+- `configs/recommender_q35765.toml` — Osaka: als.factors=64, markov.backoff=0.3, trail_current optimizado
 - `configs/recommender_q406.toml` — Istanbul: als.factors=128, markov.backoff=0.25, context_n=1
 - `configs/recommender_q864965.toml` — Petaling Jaya: als.factors=64, markov.backoff=0.25, context_n=3
 

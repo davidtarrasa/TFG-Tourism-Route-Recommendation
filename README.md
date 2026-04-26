@@ -8,7 +8,7 @@ _3 cities · 9 recommendation engines · FastAPI · PostgreSQL · Offline evalua
 
 ---
 
-![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688?logo=fastapi&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-4169E1?logo=postgresql&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-compose-2496ED?logo=docker&logoColor=white)
@@ -56,7 +56,7 @@ A complete tourism route recommendation system that takes a user's check-in hist
 
 ## ⚡ Quick Start
 
-> **Prerequisites:** Python 3.10+, Docker Desktop running
+> **Prerequisites:** Python 3.11+, Docker Desktop running
 
 ```bash
 # 1. Clone & install
@@ -100,7 +100,7 @@ python src/etl/08_load_postgres.py --dsn postgresql://tfg:tfgpass@localhost:5543
 
 > The DSN can also be set via the environment variable `POSTGRES_DSN`.
 
-**pgAdmin** is available at `http://localhost:5050` (credentials in `docker-compose.yml`).
+**pgAdmin** is available at `http://localhost:8080` (credentials in `.env`).
 
 ---
 
@@ -120,7 +120,7 @@ python -m http.server 8081
 | --------------------------------- | --------------------- |
 | `http://localhost:8081/frontend/` | Web UI                |
 | `http://127.0.0.1:8000/health`    | API health check      |
-| `http://localhost:5050`           | pgAdmin (DB explorer) |
+| `http://localhost:8080`           | pgAdmin (DB explorer) |
 
 **PowerShell shortcuts:**
 
@@ -328,10 +328,10 @@ python -m src.recommender.tune_all --city-qid Q35765 --embeddings-path src/recom
 
 ## 🎨 Figures & Visualizations
 
-### Thesis figures (26 figures)
+### Thesis figures
 
 ```bash
-# Generate all 26 thesis figures
+# Generate thesis figures
 python scripts/generate_tfg_figures.py
 
 # Generate a specific figure
@@ -467,13 +467,13 @@ Config resolution: `src/recommender/config.py` → `load_config(path, city_qid)`
 │   └── reports/
 │       ├── benchmarks/         # Benchmark JSON + MD summaries
 │       ├── figures/
-│       │   ├── tfg/            # 26 thesis figures
+│       │   ├── tfg/            # Thesis figures + auxiliary variants
 │       │   └── dataset/        # ER, ETL, bubble, heatmap
 │       └── routes/             # Sample HTML/GeoJSON routes
 ├── docs/                       # Extended documentation
 ├── frontend/                   # One-page web UI (HTML + Leaflet.js)
 ├── scripts/
-│   ├── generate_tfg_figures.py     # Thesis figure generator (26 figs)
+│   ├── generate_tfg_figures.py     # Thesis figure generator
 │   ├── generate_dataset_figures.py # Dataset figure generator (4 figs)
 │   ├── run_api.ps1
 │   └── run_frontend.ps1
@@ -682,7 +682,7 @@ flowchart TD
 | [`frontend/README.md`](frontend/README.md)                         | Frontend architecture, UI features                                |
 | [`data/README.md`](data/README.md)                                 | Data layout, PostgreSQL schema, city QID map                      |
 | [`docs/recommender_cli.md`](docs/recommender_cli.md)               | CLI quick reference for all commands                              |
-| [`docs/guia_figuras_tfg.md`](docs/guia_figuras_tfg.md)             | What each of the 30 figures shows and how to read it              |
+| [`docs/guia_figuras_tfg.md`](docs/guia_figuras_tfg.md)             | What each thesis/dataset figure shows and how to read it          |
 | [`docs/tfg_dossier_completo.md`](docs/tfg_dossier_completo.md)     | Full project dossier (motivation, design decisions, architecture) |
 
 ---

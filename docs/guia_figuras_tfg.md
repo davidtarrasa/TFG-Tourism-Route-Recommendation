@@ -2,7 +2,7 @@
 
 Este documento explica **qué se ve en cada salida visual** de las carpetas:
 
-- `data/reports/figures/tfg/` — 26 figuras de la memoria (fig_01–fig_26 + mermaid)
+- `data/reports/figures/tfg/` — figuras de la memoria (set `fig_01`–`fig_26` + variantes auxiliares/mermaid)
 - `data/reports/figures/dataset/` — 4 figuras de esquema y dataset (ER, ETL, bubble, heatmap)
 
 Incluye PNG/PDF/HTML y el CSV auxiliar de la figura de métricas. Para cada figura se incluye tanto la descripción técnica como la interpretación en lenguaje natural.
@@ -400,9 +400,9 @@ Generadas por `scripts/generate_dataset_figures.py`. Carpeta independiente de la
 
 ### `fig_er_diagram.png`
 
-**Qué muestra:** diagrama entidad-relación del esquema PostgreSQL con las 4 tablas principales.
+**Qué muestra:** diagrama entidad-relación del modelo de datos usado por el sistema.
 
-**Tablas:** `visits`, `pois`, `poi_categories`, `saved_routes`.
+**Tablas:** `visits`, `pois`, `poi_categories` (de `sql/schema.sql`) y `saved_routes` (creada on-demand por la API).
 
 **Relaciones:** visits N:1 pois (via `venue_id → fsq_id`); pois 1:N poi_categories (via `fsq_id`); pois → saved_routes (conceptual via `city_qid`, línea discontinua).
 

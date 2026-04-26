@@ -11,7 +11,8 @@ Este documento resume el estado real del repositorio tras el desarrollo completo
 ### Datos / ETL / BD
 
 - Pipeline ETL completo (`src/etl/01_...08_*.py`): limpieza, enriquecimiento y carga en PostgreSQL.
-- Esquema SQL (`sql/schema.sql`) con tablas `visits`, `pois`, `poi_categories`, `saved_routes`.
+- Esquema SQL (`sql/schema.sql`) con tablas `visits`, `pois`, `poi_categories`.
+- La tabla `saved_routes` se crea on-demand desde la API (`src/recommender/api.py`).
 - Filtro por ciudad via `city_qid` (Wikidata QID) indexado.
 - 3 ciudades operativas: Osaka (Q35765), Istanbul (Q406), Petaling Jaya (Q864965).
 - ~200 000 check-ins reales (Foursquare Semantic Trails 2018).
@@ -26,7 +27,7 @@ Este documento resume el estado real del repositorio tras el desarrollo completo
 | `embed` | Word2Vec sobre trails | `.joblib` por ciudad |
 | `als` | ALS implicito (factorizacion) | `.joblib` por ciudad |
 | `hybrid` | fusion ponderada de los 5 anteriores | config TOML |
-| `rrf` | Reciprocal Rank Fusion automatica (k=60) | no |
+| `rrf` | Reciprocal Rank Fusion automatica (k=30 por defecto) | no |
 | `popular` | baseline por frecuencia de visitas | no |
 | `random` | control aleatorio | no |
 
@@ -43,7 +44,7 @@ Este documento resume el estado real del repositorio tras el desarrollo completo
 - Split cold/warm: < 5 visitas TRAIN = cold, >= 5 = warm.
 - Metricas: Hit@K, Precision@K, Recall@K, nDCG@K + variantes por categoria + Novelty + Diversity.
 - Benchmark automatizado 3 ciudades: `benchmark_3cities.py`.
-- Figuras de tesis generadas con `scripts/generate_tfg_figures.py` (20 figuras).
+- Figuras de tesis generadas con `scripts/generate_tfg_figures.py` (set principal `fig_01`-`fig_26` + variantes auxiliares).
 
 ### Multi-ruta y API
 
@@ -126,7 +127,7 @@ Se considera aceptable para TFG dado el tamano del dataset de Istanbul.
 - [x] Protocolo de evaluacion justo (`--fair`, `last_trail_user`, cold/warm split).
 - [x] Tuning de hiperparametros por ciudad (backoff Markov, pesos hybrid, ALS factors).
 - [x] Motores adicionales: RRF (Reciprocal Rank Fusion) y Popular (baseline).
-- [x] Figuras de tesis generadas (20 figuras matplotlib + 3 diagramas mermaid PNG).
+- [x] Figuras de tesis generadas (`fig_01`-`fig_26` + variantes auxiliares/mermaid).
 - [x] Documentacion consolidada (READMEs por modulo, dossier completo, CLI guide).
 
 ---
