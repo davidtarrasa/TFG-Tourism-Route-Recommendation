@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 import joblib
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.colors as mcolors
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
@@ -35,6 +37,8 @@ except Exception:  # pragma: no cover
 
 OUTPUT_DIR = Path("data/reports/figures/tfg")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+LATEX_FIGS = ROOT_DIR / "docs" / "TFG_Memoria_IMAT_DavidTarrasa" / "figures"
+LATEX_FIGS.mkdir(parents=True, exist_ok=True)
 
 CITY_META = {
     "Q35765": {"name": "Osaka", "slug": "osaka", "lat": 34.6937, "lon": 135.5023},
@@ -365,8 +369,6 @@ def _save_sankey_fallback_png(
 
 def _draw_pipeline_fig(layers, title, engine_idx=2):
     """Core renderer for the pipeline architecture figure (Spanish & English)."""
-    LATEX_FIGS = ROOT_DIR / "docs" / "TFG_Memoria_IMAT_DavidTarrasa" / "figures"
-
     # y positions chosen so every inter-box gap is exactly 1.0 units
     # box height = 2.2, so box spans [y-1.2, y+1.0]
     # API bottom = 3.8 → gaps: 7.0-6.0=1.0, 10.2-9.2=1.0, 13.4-12.4=1.0, 16.6-15.6=1.0
@@ -425,6 +427,288 @@ def _draw_pipeline_fig(layers, title, engine_idx=2):
 
     ax.set_title(title, fontsize=16, fontweight="bold", pad=14)
     return fig, LATEX_FIGS
+
+
+def fig_etl_flow_snake():
+    """Pipeline ETL en modo serpiente (dos filas)."""
+    steps = [
+        (
+            "Foursquare\nDataset",
+            "CSV crudo - ~290 K\ncheck-ins - 3 ciudades",
+            None,
+            "#1D4ED8",
+            "#DBEAFE",
+        ),
+        (
+            "01_clean_std.py",
+            "Limpieza y normalizacion\nde check-ins",
+            "-> std_clean.csv",
+            "#0E7490",
+            "#CFFAFE",
+        ),
+        (
+            "02_extract_ids.py",
+            "Extraccion de IDs\nunicos de venues",
+            "-> venue_ids.txt",
+            "#0E7490",
+            "#CFFAFE",
+        ),
+        (
+            "03_fetch_pois.py",
+            "Consulta API Foursquare\n(metadatos de POIs)",
+            "-> pois_raw.json",
+            "#7C3AED",
+            "#EDE9FE",
+        ),
+        (
+            "04_normalize_pois.py",
+            "Normalizacion y\nalineacion de campos",
+            "-> pois_normalized.json",
+            "#0E7490",
+            "#CFFAFE",
+        ),
+        (
+            "05_label_categories.py",
+            "Etiquetado de\ncategorias y precios",
+            "-> category_price_labels.json",
+            "#0E7490",
+            "#CFFAFE",
+        ),
+        (
+            "06_impute_pois.py",
+            "Imputacion de datos\nfaltantes (x3 ciudades)",
+            "-> pois_enriched_{QID}.json",
+            "#0E7490",
+            "#CFFAFE",
+        ),
+        (
+            "07_diagnostics.py",
+            "Diagnostico y validacion\nde calidad",
+            "-> informe diagnostico",
+            "#374151",
+            "#F3F4F6",
+        ),
+        (
+            "08_load_postgres.py",
+            "Carga a PostgreSQL:\nvisits - pois - poi_categories",
+            None,
+            "#065F46",
+            "#D1FAE5",
+        ),
+        (
+            "PostgreSQL\nDB",
+            "visits - pois\npoi_categories",
+            None,
+            "#065F46",
+            "#D1FAE5",
+        ),
+    ]
+
+    cols = 5
+    box_w = 4.2
+    box_h = 2.2
+    h_gap = 0.65
+    margin_l = 0.9
+    margin_r = 0.9
+    row1_y = 10.8
+    row2_y = 4.5
+    artifact_off = 1.45
+
+    row_w = cols * box_w + (cols - 1) * h_gap
+    fig_w = margin_l + row_w + margin_r
+    fig_h = 14.0
+
+    connector_color = "#555555"
+    fs_main = 18
+    fs_title = 15
+    fs_desc = 12.5
+    fs_art = 12.5
+    fs_step = 12.5
+
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+    ax.set_xlim(0, fig_w)
+    ax.set_ylim(0, fig_h)
+    ax.axis("off")
+    fig.patch.set_facecolor("white")
+
+    def col_x(col_idx: int) -> float:
+        return margin_l + col_idx * (box_w + h_gap) + box_w / 2
+
+    row_ys = [row1_y, row2_y]
+    centers = []
+
+    for i, (title, desc, artifact, edge_color, fill_color) in enumerate(steps):
+        row = i // cols
+        col = i % cols
+        cx = col_x(col)
+        cy = row_ys[row]
+        centers.append((cx, cy))
+        is_db = i == len(steps) - 1
+
+        if is_db:
+            db_h = box_h * 1.05
+            ax.add_patch(
+                patches.FancyBboxPatch(
+                    (cx - box_w / 2, cy - db_h / 2),
+                    box_w,
+                    db_h,
+                    boxstyle="round,pad=0.05,rounding_size=0.16",
+                    lw=2.0,
+                    edgecolor=edge_color,
+                    facecolor=fill_color,
+                    zorder=2,
+                )
+            )
+            top_h = db_h * 0.14
+            ax.add_patch(
+                patches.Ellipse(
+                    (cx, cy + db_h / 2),
+                    box_w,
+                    top_h * 2,
+                    facecolor=mcolors.to_rgba(edge_color, 0.35),
+                    edgecolor=edge_color,
+                    lw=1.5,
+                    zorder=3,
+                )
+            )
+        else:
+            ax.add_patch(
+                patches.FancyBboxPatch(
+                    (cx - box_w / 2, cy - box_h / 2),
+                    box_w,
+                    box_h,
+                    boxstyle="round,pad=0.07,rounding_size=0.18",
+                    lw=2.0,
+                    edgecolor=edge_color,
+                    facecolor=fill_color,
+                    zorder=2,
+                )
+            )
+
+        ax.text(
+            cx,
+            cy + 0.36,
+            title,
+            ha="center",
+            va="center",
+            fontsize=fs_title,
+            fontweight="bold",
+            color=edge_color,
+            zorder=3,
+            multialignment="center",
+            linespacing=1.25,
+        )
+
+        ax.text(
+            cx,
+            cy - 0.36,
+            desc,
+            ha="center",
+            va="center",
+            fontsize=fs_desc,
+            color="#333333",
+            zorder=3,
+            multialignment="center",
+            linespacing=1.2,
+        )
+
+        if artifact:
+            art_y = cy - box_h / 2 - artifact_off
+            ax.plot(
+                [cx, cx],
+                [cy - box_h / 2 - 0.08, art_y + 0.3],
+                color=edge_color,
+                lw=1.3,
+                linestyle=":",
+                zorder=1,
+            )
+            ax.text(
+                cx,
+                art_y,
+                artifact,
+                ha="center",
+                va="top",
+                fontsize=fs_art,
+                color=edge_color,
+                style="italic",
+                multialignment="center",
+                linespacing=1.2,
+                zorder=3,
+            )
+
+        if 1 <= i <= len(steps) - 2:
+            ax.text(
+                cx,
+                cy + box_h / 2 + 0.22,
+                f"Paso {i}",
+                ha="center",
+                va="bottom",
+                fontsize=fs_step,
+                color=edge_color,
+                fontweight="bold",
+            )
+
+    for i in range(len(steps) - 1):
+        cx0, cy0 = centers[i]
+        cx1, cy1 = centers[i + 1]
+        row0 = i // cols
+        row1 = (i + 1) // cols
+
+        if row0 == row1:
+            ax.annotate(
+                "",
+                xy=(cx1 - box_w / 2, cy0),
+                xytext=(cx0 + box_w / 2, cy0),
+                arrowprops=dict(
+                    arrowstyle="-|>",
+                    lw=2.0,
+                    color=connector_color,
+                    mutation_scale=18,
+                ),
+                zorder=4,
+            )
+        else:
+            x_right = cx0 + box_w / 2
+            x_far_r = fig_w - 0.25
+            y_mid = (row1_y + row2_y) / 2 - 0.3
+            x_far_l = 0.25
+            x_in = cx1 - box_w / 2
+
+            ax.plot([x_right, x_far_r], [cy0, cy0], color=connector_color, lw=2.2, zorder=3)
+            ax.plot([x_far_r, x_far_r], [cy0, y_mid], color=connector_color, lw=2.2, zorder=3)
+            ax.plot([x_far_r, x_far_l], [y_mid, y_mid], color=connector_color, lw=2.2, zorder=3)
+            ax.plot([x_far_l, x_far_l], [y_mid, cy1], color=connector_color, lw=2.2, zorder=3)
+            ax.annotate(
+                "",
+                xy=(x_in, cy1),
+                xytext=(x_far_l, cy1),
+                arrowprops=dict(
+                    arrowstyle="-|>",
+                    lw=2.2,
+                    color=connector_color,
+                    mutation_scale=18,
+                ),
+                zorder=4,
+            )
+
+    ax.text(
+        fig_w / 2,
+        fig_h - 0.55,
+        "Pipeline ETL - del CSV Foursquare a PostgreSQL",
+        ha="center",
+        va="center",
+        fontsize=fs_main,
+        fontweight="bold",
+        color="#1A1A2E",
+    )
+
+    for dest in [
+        _save("fig_etl_flow_snake.png"),
+        LATEX_FIGS / "fig_etl_flow_snake.png",
+    ]:
+        fig.savefig(dest, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    log("fig_etl_flow_snake - OK")
 
 
 def fig_01_pipeline_sistema():
@@ -2307,6 +2591,8 @@ def _figure_registry() -> dict[str, Callable[[], None]]:
     return {
         "fig_01": fig_01_pipeline_sistema,
         "fig_01_en": fig_01_pipeline_sistema_en,
+        "fig_etl_snake": fig_etl_flow_snake,
+        "fig_etl_flow_snake": fig_etl_flow_snake,
         "fig_02": fig_02_pois_mapa_categorias,
         "fig_03": fig_03_heatmap_checkins,
         "fig_04": fig_04_hexbin_rating,
