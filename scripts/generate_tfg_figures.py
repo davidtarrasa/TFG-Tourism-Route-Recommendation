@@ -367,7 +367,7 @@ def _save_sankey_fallback_png(
     plt.close(fig)
 
 
-def _draw_pipeline_fig(layers, title, engine_idx=2):
+def _draw_pipeline_fig(layers, title, engine_idx=2, font_scale=1.0, bold_all=False):
     """Core renderer for the pipeline architecture figure (Spanish & English)."""
     # y positions chosen so every inter-box gap is exactly 1.0 units
     # box height = 2.2, so box spans [y-1.2, y+1.0]
@@ -375,6 +375,8 @@ def _draw_pipeline_fig(layers, title, engine_idx=2):
     y_positions = [17.8, 14.6, 11.4, 8.2, 5.0]
     # arrows span from upper-box bottom to lower-box top (centred, with 0.1 inset each end)
     arrow_pairs = [(16.5, 15.7), (13.3, 12.5), (10.1, 9.3), (6.9, 6.1)]
+
+    fw_all = "bold" if bold_all else "normal"
 
     fig, ax = plt.subplots(figsize=(12, 15))
     ax.set_xlim(0, 10)
@@ -393,7 +395,8 @@ def _draw_pipeline_fig(layers, title, engine_idx=2):
             facecolor=mcolors.to_rgba(color, 0.13),
         )
         ax.add_patch(box)
-        ax.text(1.05, y + 0.52, lbl, fontsize=13, fontweight="bold", color=color, va="center")
+        ax.text(1.05, y + 0.52, lbl, fontsize=13 * font_scale, fontweight="bold",
+                color=color, va="center")
 
         if idx == engine_idx:
             n = len(items)
@@ -412,11 +415,13 @@ def _draw_pipeline_fig(layers, title, engine_idx=2):
                 )
                 ax.add_patch(b)
                 ax.text(x0 + i * (w + gap) + w / 2, y - 0.11, item,
-                        ha="center", va="center", fontsize=7.5)
+                        ha="center", va="center", fontsize=7.5 * font_scale,
+                        fontweight=fw_all)
         else:
             for j, item in enumerate(items):
                 ax.text(1.05, y + 0.06 - j * 0.28, f"• {item}",
-                        fontsize=9.6, color="#2B2B2B", va="center")
+                        fontsize=9.6 * font_scale, color="#2B2B2B", va="center",
+                        fontweight=fw_all)
 
     # ---- arrows (equal-length, perfectly centred) ----
     for y1, y2 in arrow_pairs:
@@ -425,7 +430,7 @@ def _draw_pipeline_fig(layers, title, engine_idx=2):
             arrowprops=dict(arrowstyle="-|>", lw=1.9, color="#444"),
         )
 
-    ax.set_title(title, fontsize=16, fontweight="bold", pad=14)
+    ax.set_title(title, fontsize=16 * font_scale, fontweight="bold", pad=14)
     return fig, LATEX_FIGS
 
 
@@ -762,6 +767,35 @@ def fig_01_pipeline_sistema_en():
     for dest in [_save("fig_01_pipeline_sistema_en.png"), latex_figs / "fig_01_pipeline_sistema_en.png"]:
         fig.savefig(dest, dpi=300, bbox_inches="tight")
     plt.close(fig)
+
+
+def fig_pipeline2():
+    """Variante de fig_01_pipeline_sistema con fuente más grande y todo en negrita."""
+    layers = [
+        ("FUENTES DE DATOS", "#2E86AB",
+         ["std_2018 (Semantic Trails)", "Foursquare Venues API", "Geoapify Routing API"]),
+        ("ETL / PROCESAMIENTO", "#A23B72",
+         ["Limpieza y normalización", "Enriquecimiento POIs", "Carga PostgreSQL"]),
+        ("MOTORES DE RECOMENDACIÓN", "#F18F01",
+         ["Content\n(TF-IDF)", "Item-Item\n(co-visit.)", "Markov\n(transic.)",
+          "Embed\n(Word2Vec)", "ALS\n(impl. CF)", "Hybrid\n(fusión)",
+          "RRF\n(rank fus.)", "Popular\n(baseline)"]),
+        ("SCORING + RUTA", "#C73E1D",
+         ["Normalización de scores", "Fusión: hybrid ponderado + RRF automático",
+          "Reranking (distancia, precio, diversidad)", "NN + 2-opt ordering",
+          "GeoJSON + Leaflet export"]),
+        ("API + FRONTEND", "#3B1F2B",
+         ["FastAPI /multi-recommend", "Variantes: history/inputs/location/full",
+          "Interfaz web interactiva", "Mapa Leaflet con rutas"]),
+    ]
+    fig, latex_figs = _draw_pipeline_fig(
+        layers, "Pipeline completo del sistema de recomendación turística",
+        font_scale=1.35, bold_all=True,
+    )
+    for dest in [_save("fig_pipeline2.png"), latex_figs / "fig_pipeline2.png"]:
+        fig.savefig(dest, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    log("fig_pipeline2 — OK")
 
 
 def fig_02_pois_mapa_categorias():
@@ -1411,12 +1445,12 @@ def fig_14_radar_chart():
     angles = np.linspace(0, 2 * np.pi, n, endpoint=False).tolist()
     angles += angles[:1]
 
-    fig, ax = plt.subplots(figsize=(9, 9), subplot_kw=dict(polar=True))
+    fig, ax = plt.subplots(figsize=(10, 10), subplot_kw=dict(polar=True))
     for _, row in agg.iterrows():
         mode_name = str(row["mode"])
         vals = [float(row[m]) for m in metrics] + [float(row[metrics[0]])]
         color = palette.get(mode_name, "#888888")
-        lw = 2.8 if mode_name in ("rrf", "markov") else 2.0
+        lw = 3.2 if mode_name in ("rrf", "markov") else 2.4
         ls = "--" if mode_name == "random" else "-"
         alpha = 0.07 if mode_name == "random" else 0.12
         label = "random (control)" if mode_name == "random" else mode_name
@@ -1424,14 +1458,15 @@ def fig_14_radar_chart():
         ax.fill(angles, vals, alpha=alpha, color=color)
 
     ax.set_xticks(angles[:-1])
-    ax.set_xticklabels(metric_labels, fontsize=11)
+    ax.set_xticklabels(metric_labels, fontsize=15)
     ax.set_ylim(0, 1)
-    ax.yaxis.set_tick_params(labelsize=8)
+    ax.yaxis.set_tick_params(labelsize=11)
     ax.set_title(
         "Radar multi-métrica: motores principales\n(media Osaka + Petaling Jaya · als, embed, content, item, popular omitidos por claridad)",
-        fontsize=13, fontweight="bold", pad=18,
+        fontsize=15, fontweight="bold", pad=22,
     )
-    ax.legend(loc="upper right", bbox_to_anchor=(1.28, 1.12), fontsize=10)
+    ax.legend(loc="lower center", bbox_to_anchor=(0.5, -0.18), fontsize=14,
+              ncol=4, framealpha=0.9, edgecolor="#cccccc")
     fig.savefig(_save("fig_14_radar_chart.png"), dpi=300, bbox_inches="tight")
     plt.close(fig)
 
@@ -2591,6 +2626,7 @@ def _figure_registry() -> dict[str, Callable[[], None]]:
     return {
         "fig_01": fig_01_pipeline_sistema,
         "fig_01_en": fig_01_pipeline_sistema_en,
+        "fig_pipeline2": fig_pipeline2,
         "fig_etl_snake": fig_etl_flow_snake,
         "fig_etl_flow_snake": fig_etl_flow_snake,
         "fig_02": fig_02_pois_mapa_categorias,

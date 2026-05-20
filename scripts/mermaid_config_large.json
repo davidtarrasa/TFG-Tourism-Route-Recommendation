@@ -1,0 +1,10 @@
+{
+  "theme": "default",
+  "themeVariables": {
+    "fontSize": "28px",
+    "fontFamily": "arial, sans-serif",
+    "edgeLabelBackground": "#ffffff",
+    "nodeTextColor": "#000000",
+    "clusterBkg": "#ffffff"
+  }
+}

@@ -1,0 +1,34 @@
+flowchart TD
+    START(["Petición de ruta\nciudad · k POIs"])
+    H1{¿Usuario tiene\nhistorial de visitas?}
+    H2{¿Proporciona\npreferencias de categoría?}
+    H3{¿Historial rico\n≥ 10 visitas?}
+    H4{¿Usuario\nrecurrente en la ciudad?}
+
+    CT["🏷️ Motor Content\nTF-IDF · preferencias declaradas"]
+    POP["🌟 Motor Item-Item\nPOIs populares en la ciudad"]
+    EM["🔡 Motor Embed\nWord2Vec · trails cortos"]
+    AL["🤝 Motor ALS\nFiltrado colaborativo"]
+    HY["⚡ Motor Hybrid\nALS + Markov + Embed"]
+
+    EVA["Evaluación offline\nHit@k · NDCG · Diversidad · Novelty"]
+    OUT[["🗺️ Ruta generada\nk POIs ordenados + mapa"]]
+
+    START --> H1
+    H1 -- No --> H2
+    H2 -- Sí --> CT
+    H2 -- No --> POP
+    H1 -- Sí --> H3
+    H3 -- No --> EM
+    H3 -- Sí --> H4
+    H4 -- No --> AL
+    H4 -- Sí --> HY
+
+    CT & POP & EM & AL & HY --> EVA --> OUT
+
+    classDef decision fill:#fff3cd,stroke:#f0a500,color:#000
+    classDef engine fill:#d4edda,stroke:#28a745,color:#000
+    classDef io fill:#cce5ff,stroke:#004085,color:#000
+    class H1,H2,H3,H4 decision
+    class CT,POP,EM,AL,HY engine
+    class START,OUT io
