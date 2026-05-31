@@ -95,3 +95,5 @@ user_top_categories = 5
 # Penalize very popular POIs (hubs) in Markov recommendations.
 hub_alpha = 0
 backoff = 0.3
+# Snap-to-nearest-POI radius (km) when only lat/lon arrives (no current_poi).
+snap_radius_km = 0.3

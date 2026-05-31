@@ -96,6 +96,10 @@ user_top_categories = 5
 [markov]
 # Penalize very popular POIs (hubs) in Markov recommendations.
 hub_alpha = 0.5
+# Snap-to-nearest-POI radius (km): when the client sends lat/lon but no
+# current_poi, the recommender maps those coordinates to the closest meaningful
+# POI within this radius so Markov can contribute. Set to 0 to disable.
+snap_radius_km = 0.3
 
 [surprise]
 # Optional product feature: inject one "soft surprise" POI in the FULL route.

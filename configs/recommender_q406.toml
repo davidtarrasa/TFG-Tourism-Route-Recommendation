@@ -96,3 +96,5 @@ user_top_categories = 5
 hub_alpha = 0
 # Istanbul tiene patrones secuenciales fuertes — confiamos más en orden-2 (menos backoff a orden-1).
 backoff = 0.25
+# Snap-to-nearest-POI radius (km) when only lat/lon arrives (no current_poi).
+snap_radius_km = 0.3

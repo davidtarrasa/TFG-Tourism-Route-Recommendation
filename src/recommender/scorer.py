@@ -59,6 +59,60 @@ def _apply_hub_penalty(scores: Dict[str, float], item_counts: Dict[str, int], al
     return out
 
 
+def _snap_to_nearest_poi(
+    lat: float,
+    lon: float,
+    pois_df: pd.DataFrame,
+    exclude_categories: set,
+    item_counts: Dict[str, int],
+    radius_km: float,
+) -> Optional[str]:
+    """
+    Map free coordinates to the nearest "Markov-useful" POI within radius_km.
+
+    Used when the client provides lat/lon but no explicit current_poi: lets the
+    sequential motor (Markov) participate by treating the coordinates as if the
+    user were at the closest meaningful POI. Returns None if no POI qualifies,
+    so Markov stays silent (no change from prior behavior).
+
+    Preference order among POIs inside the radius:
+      1) Seen in training (has Markov transitions) over unseen.
+      2) Higher rating.
+      3) Closer distance.
+    """
+    if radius_km <= 0 or pois_df is None or pois_df.empty:
+        return None
+    df = pois_df.dropna(subset=["lat", "lon", "fsq_id", "primary_category"]).copy()
+    if df.empty:
+        return None
+    if exclude_categories:
+        df = df[~df["primary_category"].isin(exclude_categories)]
+        if df.empty:
+            return None
+
+    R = 6371.0
+    la1 = np.radians(float(lat))
+    lo1 = np.radians(float(lon))
+    la2 = np.radians(df["lat"].astype(float).to_numpy())
+    lo2 = np.radians(df["lon"].astype(float).to_numpy())
+    dlat = la2 - la1
+    dlon = lo2 - lo1
+    a = np.sin(dlat / 2) ** 2 + np.cos(la1) * np.cos(la2) * np.sin(dlon / 2) ** 2
+    df = df.assign(d_km=R * 2 * np.arcsin(np.sqrt(a)))
+
+    near = df[df["d_km"] <= float(radius_km)]
+    if near.empty:
+        return None
+
+    visited_ids = set(item_counts.keys())
+    near = near.assign(
+        visited=near["fsq_id"].astype(str).isin(visited_ids).astype(int),
+        r=pd.to_numeric(near.get("rating"), errors="coerce").fillna(0.0),
+    )
+    near = near.sort_values(["visited", "r", "d_km"], ascending=[False, False, True])
+    return str(near.iloc[0]["fsq_id"])
+
+
 def _embedding_context(user_items: List[str], current_poi: Optional[str], context_n: int) -> List[str]:
     ctx = [str(x) for x in user_items if x]
     if current_poi:
@@ -152,6 +206,22 @@ def recommend(
     trans_poi, trans_cat = build_transitions(visits_df, pois_df)
     trans_poi2 = build_transitions_order2(visits_df)
 
+    # Snap-to-nearest-POI: si llegan coordenadas pero no current_poi, mapeamos
+    # esas coords al POI cercano más "útil" para que Markov pueda contribuir.
+    # Si ningún POI cae dentro del radio, snapped_poi=None y Markov sigue en
+    # silencio (comportamiento previo, sin regresiones).
+    snapped_poi: Optional[str] = None
+    if current_poi is None and lat is not None and lon is not None:
+        snapped_poi = _snap_to_nearest_poi(
+            lat=float(lat),
+            lon=float(lon),
+            pois_df=pois_df,
+            exclude_categories=exclude_categories,
+            item_counts=item_counts,
+            radius_km=float(markov_cfg.get("snap_radius_km", 0.3)),
+        )
+    seq_current_poi: Optional[str] = current_poi or snapped_poi
+
     # Embeddings opcionales
     embed_scores: Dict[str, float] = {}
     if use_embeddings and mode in ("hybrid", "embed"):
@@ -228,18 +298,18 @@ def recommend(
     content_scores = score_content(user_items, tfidf_ids, tfidf_matrix) if mode in ("hybrid", "content", "embed") else {}
     co_scores = score_co_visitation(user_items, co_mat, id_to_idx, idx_to_id) if mode in ("hybrid", "item", "embed") else {}
     markov_scores = {}
-    if mode in ("hybrid", "markov", "embed") and current_poi:
+    if mode in ("hybrid", "markov", "embed") and seq_current_poi:
         prev_poi = None
         if user_items:
             # Best-effort previous POI from history.
-            if len(user_items) >= 2 and str(user_items[-1]) == str(current_poi):
+            if len(user_items) >= 2 and str(user_items[-1]) == str(seq_current_poi):
                 prev_poi = str(user_items[-2])
             else:
                 prev_poi = str(user_items[-1])
-        markov_scores = dict(next_poi_order2(prev_poi, str(current_poi), trans_poi2, trans_poi, topn=2000, backoff=float(markov_cfg.get("backoff", 0.3))))
+        markov_scores = dict(next_poi_order2(prev_poi, str(seq_current_poi), trans_poi2, trans_poi, topn=2000, backoff=float(markov_cfg.get("backoff", 0.3))))
         # Si no hay transiciones POI→POI, usar transiciones de categoría del POI actual
         if not markov_scores:
-            current_row = pois_df[pois_df["fsq_id"] == current_poi]
+            current_row = pois_df[pois_df["fsq_id"] == seq_current_poi]
             if not current_row.empty:
                 cur_cat = current_row.iloc[0].get("primary_category")
                 if cur_cat in trans_cat:
@@ -281,12 +351,14 @@ def recommend(
     elif mode == "als":
         combined = als_scores
     else:
-        # Pesos según señales disponibles (reforzamos item/markov)
-        if user_items and current_poi:
+        # Pesos según señales disponibles (reforzamos item/markov).
+        # Usamos seq_current_poi para que un POI snapeado active la rama
+        # secuencial igual que un current_poi explícito.
+        if user_items and seq_current_poi:
             w = list(hyb_cfg.get("user_current", [0.1, 0.15, 0.15, 0.05, 0.55]))
         elif user_items:
             w = list(hyb_cfg.get("user_only", [0.1, 0.2, 0.1, 0.05, 0.55]))
-        elif current_poi:
+        elif seq_current_poi:
             w = list(hyb_cfg.get("current_only", [0.1, 0.15, 0.35, 0.05, 0.35]))
         elif embed_scores or als_scores:
             w = list(hyb_cfg.get("embed_or_als", [0.15, 0.15, 0.1, 0.15, 0.45]))
